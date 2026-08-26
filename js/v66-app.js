@@ -16,13 +16,15 @@ if(!configured){
 }
 
 async function boot(db){
-  let session=null,profile=null,currentPage='home';
+  let session=null,profile=null,currentPage='home',previewRole=null;
   const shell=el('div',{class:'v66-shell'});
   document.body.appendChild(shell);document.body.classList.add('v66-lock');
   const setMessage=(node,text,type='')=>{node.textContent=text||'';node.className='v66-message '+type};
   const toast=text=>{const n=el('div',{class:'v66-toast'},esc(text));document.body.appendChild(n);setTimeout(()=>n.remove(),3500)};
   const fail=e=>{console.error(e);toast(e?.message||'Une erreur est survenue.')};
   const fullName=p=>`${p?.first_name||''} ${p?.last_name||''}`.trim()||p?.email||'Compte';
+  const isEthan=()=>String(session?.user?.email||'').toLowerCase()==='ethan.mijalkovic1@gmail.com';
+  const visibleRole=()=>isEthan()&&previewRole?previewRole:profile?.role;
 
   window.addEventListener('online',()=>{renderOffline();if(session&&profile?.status==='active')syncLegacySheets().catch(()=>{})});window.addEventListener('offline',()=>renderOffline());
   window.addEventListener('antras:local-sheets-changed',()=>{if(session&&profile?.status==='active'&&navigator.onLine)syncLegacySheets().catch(()=>{})});
@@ -44,7 +46,7 @@ async function boot(db){
         if(mode==='login'){
           const {error}=await db.auth.signInWithPassword({email:values.email,password:values.password});if(error)throw error;
         }else{
-          const {data,error}=await db.auth.signUp({email:values.email,password:values.password,options:{data:{first_name:values.first_name.trim(),last_name:values.last_name.trim(),employee_number:values.employee_number.trim()}}});if(error)throw error;
+          const {data,error}=await db.auth.signUp({email:values.email,password:values.password,options:{emailRedirectTo:new URL('v66.html',location.href).href,data:{first_name:values.first_name.trim(),last_name:values.last_name.trim(),employee_number:values.employee_number.trim()}}});if(error)throw error;
           if(!data.session){setMessage(msg,'Demande créée. Vérifie ton e-mail, puis connecte-toi.','ok');form.reset();return}
         }
       }catch(error){setMessage(msg,error.message,'error')}finally{button.disabled=false}
@@ -65,27 +67,32 @@ async function boot(db){
   }
 
   function allowedPages(){
+    const role=visibleRole();
     const pages=[['home','Accueil']];
-    if(profile.role==='rh')pages.push(['accounts','Comptes']);
-    if(profile.role==='rh')pages.push(['review','Validations']);
-    if(profile.role==='conducteur')pages.push(['team','Fiches équipes']);
-    if(profile.role==='admin')pages.push(['team','Toutes les fiches']);
-    if(['rh','admin'].includes(profile.role))pages.push(['projects','Chantiers']);
-    if(['rh','admin'].includes(profile.role))pages.push(['stats','Statistiques']);
+    if(role==='rh')pages.push(['accounts','Comptes']);
+    if(role==='rh')pages.push(['review','Validations']);
+    if(role==='conducteur')pages.push(['team','Fiches équipes']);
+    if(role==='admin')pages.push(['team','Toutes les fiches']);
+    if(['rh','admin'].includes(role))pages.push(['projects','Chantiers']);
+    if(['rh','admin'].includes(role))pages.push(['stats','Statistiques']);
     pages.push(['legacy','Fiches d’heures']);
     return pages;
   }
 
   function appScreen(){
     const pages=allowedPages();if(!pages.some(x=>x[0]===currentPage))currentPage='home';
-    shell.innerHTML=`<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span></div><div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[profile.role])}</span></div></header><nav class="v66-nav">${pages.map(([id,label])=>`<button data-page="${id}" class="${id===currentPage?'active':''}">${esc(label)}</button>`).join('')}<button id="v66Logout">Déconnexion</button></nav><main class="v66-main" id="v66Content"></main>`;
+    const role=visibleRole();
+    const preview=isEthan()?`<label class="v66-role-preview"><span>Aperçu test</span><select id="v66RolePreview">${Object.entries(roleLabels).map(([id,label])=>`<option value="${id}" ${role===id?'selected':''}>${esc(label)}</option>`).join('')}</select></label>`:'';
+    shell.innerHTML=`<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole?' · simulation':''}</span></div></div></header>${previewRole?'<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste RH.</div>':''}<nav class="v66-nav">${pages.map(([id,label])=>`<button data-page="${id}" class="${id===currentPage?'active':''}">${esc(label)}</button>`).join('')}<button id="v66Logout">Déconnexion</button></nav><main class="v66-main" id="v66Content"></main>`;
     renderOffline();shell.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{currentPage=b.dataset.page;appScreen()});shell.querySelector('#v66Logout').onclick=()=>db.auth.signOut();
+    shell.querySelector('#v66RolePreview')?.addEventListener('change',e=>{previewRole=e.target.value===profile.role?null:e.target.value;currentPage='home';appScreen()});
     const content=shell.querySelector('#v66Content');
     if(currentPage==='home')renderHome(content);if(currentPage==='accounts')renderAccounts(content);if(currentPage==='review')renderSharedSheets(content,true);if(currentPage==='team')renderSharedSheets(content,false);if(currentPage==='projects')renderProjects(content);if(currentPage==='stats')renderStats(content);if(currentPage==='legacy')renderLegacy(content);
   }
 
   function renderHome(root){
-    root.innerHTML=`<section class="v66-page"><div class="v66-pagehead"><div><h1>Bonjour ${esc(profile.first_name||'')}</h1><p>Ton espace est adapté au rôle ${esc(roleLabels[profile.role])}.</p></div></div><div class="v66-stats"><div class="v66-stat"><small>Compte</small><strong>Actif</strong></div><div class="v66-stat"><small>Rôle</small><strong style="font-size:16px">${esc(roleLabels[profile.role])}</strong></div><div class="v66-stat"><small>Connexion</small><strong style="font-size:16px">${navigator.onLine?'En ligne':'Hors ligne'}</strong></div></div><div class="v66-card"><h2>Prochaine étape</h2><p class="v66-help">${profile.role==='rh'?'Valide les demandes de comptes, attribue les rôles, puis crée les chantiers.':profile.role==='admin'?'Configure les chantiers et contrôle les données techniques.':profile.role==='conducteur'?'Tu pourras consulter les fiches contenant au moins un chantier qui t’est attribué.':'Utilise la page Fiches d’heures pour saisir et envoyer ta semaine.'}</p></div></section>`;
+    const role=visibleRole();
+    root.innerHTML=`<section class="v66-page"><div class="v66-pagehead"><div><h1>Bonjour ${esc(profile.first_name||'')}</h1><p>Ton espace est adapté au rôle ${esc(roleLabels[role])}.</p></div></div><div class="v66-stats"><div class="v66-stat"><small>Compte</small><strong>Actif</strong></div><div class="v66-stat"><small>Rôle affiché</small><strong style="font-size:16px">${esc(roleLabels[role])}</strong></div><div class="v66-stat"><small>Connexion</small><strong style="font-size:16px">${navigator.onLine?'En ligne':'Hors ligne'}</strong></div></div><div class="v66-card"><h2>Prochaine étape</h2><p class="v66-help">${role==='rh'?'Valide les demandes de comptes, attribue les rôles, puis crée les chantiers.':role==='admin'?'Configure les chantiers et contrôle les données techniques.':role==='conducteur'?'Tu pourras consulter les fiches contenant au moins un chantier qui t’est attribué.':'Utilise la page Fiches d’heures pour saisir et envoyer ta semaine.'}</p></div></section>`;
   }
 
   async function renderAccounts(root){
@@ -116,7 +123,8 @@ async function boot(db){
   }
 
   async function renderSharedSheets(root,canReview){
-    root.innerHTML=`<div class="v66-pagehead"><div><h1>${canReview?'Validations RH':profile.role==='admin'?'Toutes les fiches':'Fiches de mes chantiers'}</h1><p>${canReview?'Fiches envoyées, modifiées, validées ou refusées.':profile.role==='admin'?'Accès technique à toutes les données.':'Lecture seule : identité, heures, repas, IT et tâches.'}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
+    const role=visibleRole();
+    root.innerHTML=`<div class="v66-pagehead"><div><h1>${canReview?'Validations RH':role==='admin'?'Toutes les fiches':'Fiches de mes chantiers'}</h1><p>${canReview?'Fiches envoyées, modifiées, validées ou refusées.':role==='admin'?'Accès technique à toutes les données.':'Lecture seule : identité, heures, repas, IT et tâches.'}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
     try{
       let query=db.from('timesheets').select('id,iso_year,iso_week,status,rejection_reason,version,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(work_date,meal,travel_km,tasks,manual_task,timesheet_sites(project_code_snapshot,project_name_snapshot,hours))').order('iso_year',{ascending:false}).order('iso_week',{ascending:false});
       if(canReview)query=query.in('status',['pending_review','changed_after_validation','validated','rejected']);

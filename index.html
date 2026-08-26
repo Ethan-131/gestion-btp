@@ -7307,6 +7307,7 @@ body{background:#f3f5f4}
 
 <script>
 (function(){
+  window.antrasEscapeHtml = value=>String(value??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   window.antrasHoursOptions = Array.from({length:25},(_,i)=>i/2);
 
   window.antrasGetDaySites = function(row){
@@ -7340,12 +7341,12 @@ body{background:#f3f5f4}
       const extras=sites.filter(s=>s.chantier);
       const chantierCol=row.querySelector('.chantiercol');
       if(chantierCol) chantierCol.classList.toggle('has-sites',extras.length>0);
-      sum.innerHTML=extras.map(s=>`<span class=\"extraSiteLine\">${s.chantier||'Chantier'}</span>`).join('');
+      sum.innerHTML=extras.map(s=>`<span class=\"extraSiteLine\">${window.antrasEscapeHtml(s.chantier||'Chantier')}</span>`).join('');
     }
     const tasks=window.antrasGetDayTasks(row);
     row.dataset.tasks=JSON.stringify(tasks);
     const ts=row.querySelector('.selectedTasksSummary');
-    if(ts)ts.innerHTML=tasks.map(t=>`<span class="selectedTaskChip">${t}</span>`).join('');
+    if(ts)ts.innerHTML=tasks.map(t=>`<span class="selectedTaskChip">${window.antrasEscapeHtml(t)}</span>`).join('');
     const btn=row.querySelector('.manageTasksBtn');
     if(btn)btn.textContent=tasks.length?`${tasks.length} tâche${tasks.length>1?'s':''} sélectionnée${tasks.length>1?'s':''}`:'Choisir les tâches';
   };
@@ -7428,6 +7429,8 @@ body{background:#f3f5f4}
        '.taskpick','.taskmanual','.vehicleline input','.boncol input'
      ];
      fields.forEach(sel=>{const e=r.querySelector(sel);if(e)e.value=''});
+     delete r.dataset.sites;delete r.dataset.tasks;r.classList.remove('has-multi-sites');
+     window.antrasUpdateExtraUi?.(r);
    });
    const obs=sec.querySelector('.obs textarea'); if(obs) obs.value='';
  }
@@ -7641,7 +7644,7 @@ body{background:#f3f5f4}
      const body=folder.querySelector('.yearFolderBody');
      folder.querySelector('.yearFolderHead').onclick=()=>folder.classList.toggle('open');
      groups[year].forEach(d=>{
-       const total=(d.days||[]).reduce((s,x)=>s+(Number(x.heures)||0),0);
+       const total=(d.days||[]).reduce((s,x)=>s+window.antrasDayHoursTotal(x),0);
        const c=document.createElement('div');c.className='savedSheetCard';
        c.innerHTML=`<h3>Semaine ${d.week}</h3><p>${total} heures · ${d.year}</p><button class="open">Voir la fiche</button><button class="del">Supprimer</button>`;
        c.querySelector('.open').onclick=()=>{document.getElementById('savedSheetsPage').classList.remove('open');showSavedDetail(d)};
@@ -8167,8 +8170,8 @@ body{background:#f3f5f4}
   }
   function draftHasContent(d){
     if(!d)return false;
-    if((d.obs||'').trim())return true;
-    return (d.days||[]).some(x=>Object.values(x||{}).some(v=>String(v??'').trim()!==''));
+    const meaningful=v=>v==null?false:Array.isArray(v)?v.some(meaningful):typeof v==='object'?Object.values(v).some(meaningful):String(v).trim()!=='';
+    return meaningful(d.obs)||(d.days||[]).some(meaningful);
   }
   function statusFor(year,week){
     if(savedItems().some(x=>Number(x.year)===Number(year)&&Number(x.week)===Number(week))) return 'saved';
@@ -8270,23 +8273,19 @@ const monthOf=s=>{const f=(s.days||[]).find(d=>d.date)?.date;if(f){const p=Strin
 const siteKey=d=>{const c=String(d.chantier||'').trim();return c||'Chantier non renseigné'};
 const fmt=n=>String(Math.round((Number(n)||0)*10)/10).replace('.',',');
 function weeklySvg(rows){if(!rows.length)return '<div class="statsEmpty">Aucune donnée hebdomadaire.</div>';const data=[...rows].sort((a,b)=>a.week-b.week),W=620,H=190,l=32,r=12,t=18,b=28,max=Math.max(1,...data.map(x=>x.hours)),X=i=>data.length===1?(W-l-r)/2+l:l+i*(W-l-r)/(data.length-1),Y=v=>t+(max-v)*(H-t-b)/max;let grid='';for(let k=0;k<=4;k++){const gy=t+k*(H-t-b)/4;grid+=`<line class="chartGrid" x1="${l}" y1="${gy}" x2="${W-r}" y2="${gy}"></line><text class="chartLabel" x="2" y="${gy+3}">${fmt(max*(1-k/4))}</text>`}const pts=data.map((d,i)=>`${X(i)},${Y(d.hours)}`).join(' '),marks=data.map((d,i)=>`<circle class="chartPoint" cx="${X(i)}" cy="${Y(d.hours)}" r="4"></circle><text class="chartLabel" x="${X(i)}" y="${H-8}" text-anchor="middle">S${d.week}</text>`).join('');return `<svg viewBox="0 0 ${W} ${H}">${grid}<polyline class="chartLine" points="${pts}"></polyline>${marks}</svg>`}
-function refresh(){const y=Number(yearSel.value),p=periodSel.value,sheets=allSaved().filter(s=>Number(s.year)===y&&(p==='all'||monthOf(s)===Number(p))),siteMap=new Map(),weekMap=new Map();let hours=0,meals=0,it=0;sheets.forEach(s=>{let wh=0;(s.days||[]).forEach(d=>{const r=Number(d.repas)||0,iv=Number(d.it)||0,sites=(d.sites&&d.sites.length?d.sites:[{code:d.code||'',chantier:d.chantier||'',heures:d.heures??''}]);const dh=sites.reduce((ss,x)=>ss+(Number(x.heures)||0),0);hours+=dh;meals+=r;it+=iv;wh+=dh;sites.forEach((site,idx)=>{const hh=Number(site.heures)||0;if(hh||site.chantier||site.code){const k=siteKey(site),cur=siteMap.get(k)||{name:k,hours:0,meals:0,it:0};cur.hours+=hh;if(idx===0){cur.meals+=r;cur.it+=iv}siteMap.set(k,cur)}})});weekMap.set(Number(s.week)||0,(weekMap.get(Number(s.week)||0)||0)+wh)});document.getElementById('statsHours').textContent=fmt(hours)+' h';document.getElementById('statsMeals').textContent=fmt(meals);document.getElementById('statsIT').textContent=fmt(it);document.getElementById('statsSites').textContent=siteMap.size;const sites=[...siteMap.values()].sort((a,b)=>b.hours-a.hours),max=Math.max(1,...sites.map(x=>x.hours));const pie=document.getElementById('statsPie'),legend=document.getElementById('statsPieLegend');if(pie&&legend){const ps=sites.filter(s=>s.hours>0),tot=ps.reduce((a,s)=>a+s.hours,0),colors=['#0b5f3a','#e67e22','#2e86de','#c0392b','#8e44ad','#16a085','#f1c40f','#34495e'];if(tot>0){let st=0;const seg=ps.slice(0,8).map((s,i)=>{const pct=s.hours/tot*100,x=`${colors[i%colors.length]} ${st}% ${st+pct}%`;st+=pct;return x});pie.style.background=`conic-gradient(${seg.join(',')})`;legend.innerHTML=ps.slice(0,8).map((s,i)=>`<div class="statsPieLegendRow"><span class="statsPieDot" style="background:${colors[i%colors.length]}"></span><span class="statsPieName">${s.name}</span><span class="statsPieValue">${fmt(s.hours)} h · ${Math.round(s.hours/tot*100)}%</span></div>`).join('')}else{pie.style.background='#e8eee9';legend.innerHTML='<div class="statsEmpty">Aucune heure de chantier sur cette période.</div>'}}document.getElementById('siteBars').innerHTML=sites.length?sites.slice(0,10).map(s=>`<div class="siteBarRow"><div class="siteBarName">${s.name}</div><div class="siteBarTrack"><div class="siteBarFill" style="width:${Math.max(2,s.hours/max*100)}%"></div></div><div class="siteBarValue">${fmt(s.hours)} h</div></div>`).join(''):'<div class="statsEmpty">Aucun chantier renseigné.</div>';const weekEntries=[...weekMap.entries()].filter(([week])=>week>0).map(([week,hours])=>({week,hours})).sort((a,b)=>a.week-b.week);
-const workedWeeks=weekEntries.filter(x=>x.hours>0);
-const weeklySummary=document.getElementById('weeklySummary');
-if(weeklySummary){
-  if(workedWeeks.length){
-    const avg=workedWeeks.reduce((s,x)=>s+x.hours,0)/workedWeeks.length;
-    const busiest=workedWeeks.reduce((a,b)=>b.hours>a.hours?b:a);
-    const lightest=workedWeeks.reduce((a,b)=>b.hours<a.hours?b:a);
-    weeklySummary.innerHTML=`<div class="weeklySummaryItem"><span>Moyenne / semaine</span><strong>${fmt(avg)} h</strong></div>
-    <div class="weeklySummaryItem"><span>Semaines travaillées</span><strong>${workedWeeks.length}</strong></div>
-    <div class="weeklySummaryItem"><span>Semaine la + chargée</span><strong>${fmt(busiest.hours)} h</strong><small>Semaine ${busiest.week}</small></div>
-    <div class="weeklySummaryItem"><span>Semaine la - chargée</span><strong>${fmt(lightest.hours)} h</strong><small>Semaine ${lightest.week}</small></div>`;
-  }else{
-    weeklySummary.innerHTML='<div class="statsEmpty" style="grid-column:1/-1">Aucune semaine travaillée sur cette période.</div>';
-  }
+function refresh(){
+ const y=Number(yearSel.value),p=periodSel.value,target=p==='all'?null:Number(p);
+ const dayMatches=d=>{if(target===null)return true;const a=String(d.date||'').split('/');return a.length===3&&Number(a[1])===target};
+ const sheets=allSaved().filter(s=>Number(s.year)===y&&(s.days||[]).some(dayMatches)),siteMap=new Map(),weekMap=new Map();let hours=0,meals=0,it=0,matchedDays=0;
+ sheets.forEach(s=>{let wh=0;(s.days||[]).filter(dayMatches).forEach(d=>{matchedDays++;const r=Number(d.repas)||0,iv=Number(d.it)||0,sites=(d.sites&&d.sites.length?d.sites:[{code:d.code||'',chantier:d.chantier||'',heures:d.heures??''}]);const dh=sites.reduce((ss,x)=>ss+(Number(x.heures)||0),0);hours+=dh;meals+=r;it+=iv;wh+=dh;sites.forEach((site,idx)=>{const hh=Number(site.heures)||0;if(hh||site.chantier||site.code){const k=siteKey(site),cur=siteMap.get(k)||{name:k,hours:0,meals:0,it:0};cur.hours+=hh;if(idx===0){cur.meals+=r;cur.it+=iv}siteMap.set(k,cur)}})});if(wh)weekMap.set(Number(s.week)||0,wh)});
+ document.getElementById('statsHours').textContent=fmt(hours)+' h';document.getElementById('statsMeals').textContent=fmt(meals);document.getElementById('statsIT').textContent=fmt(it);document.getElementById('statsSites').textContent=siteMap.size;
+ const sites=[...siteMap.values()].sort((a,b)=>b.hours-a.hours),max=Math.max(1,...sites.map(x=>x.hours)),pie=document.getElementById('statsPie'),legend=document.getElementById('statsPieLegend');
+ if(pie&&legend){const ps=sites.filter(s=>s.hours>0),tot=ps.reduce((a,x)=>a+x.hours,0),colors=['#0b5f3a','#e67e22','#2e86de','#c0392b','#8e44ad','#16a085','#f1c40f','#34495e'];if(tot>0){let st=0;const seg=ps.slice(0,8).map((x,i)=>{const pct=x.hours/tot*100,v=`${colors[i%colors.length]} ${st}% ${st+pct}%`;st+=pct;return v});pie.style.background=`conic-gradient(${seg.join(',')})`;legend.innerHTML=ps.slice(0,8).map((x,i)=>`<div class="statsPieLegendRow"><span class="statsPieDot" style="background:${colors[i%colors.length]}"></span><span class="statsPieName">${window.antrasEscapeHtml(x.name)}</span><span class="statsPieValue">${fmt(x.hours)} h · ${Math.round(x.hours/tot*100)}%</span></div>`).join('')}else{pie.style.background='#e8eee9';legend.innerHTML='<div class="statsEmpty">Aucune heure de chantier sur cette période.</div>'}}
+ document.getElementById('siteBars').innerHTML=sites.length?sites.slice(0,10).map(x=>`<div class="siteBarRow"><div class="siteBarName">${window.antrasEscapeHtml(x.name)}</div><div class="siteBarTrack"><div class="siteBarFill" style="width:${Math.max(2,x.hours/max*100)}%"></div></div><div class="siteBarValue">${fmt(x.hours)} h</div></div>`).join(''):'<div class="statsEmpty">Aucun chantier renseigné.</div>';
+ const workedWeeks=[...weekMap.entries()].filter(([w,h])=>w>0&&h>0).map(([week,hours])=>({week,hours})).sort((a,b)=>a.week-b.week),weeklySummary=document.getElementById('weeklySummary');
+ if(workedWeeks.length){const avg=workedWeeks.reduce((q,x)=>q+x.hours,0)/workedWeeks.length,busiest=workedWeeks.reduce((a,b)=>b.hours>a.hours?b:a),lightest=workedWeeks.reduce((a,b)=>b.hours<a.hours?b:a);weeklySummary.innerHTML=`<div class="weeklySummaryItem"><span>Moyenne / semaine</span><strong>${fmt(avg)} h</strong></div><div class="weeklySummaryItem"><span>Semaines travaillées</span><strong>${workedWeeks.length}</strong></div><div class="weeklySummaryItem"><span>Semaine la + chargée</span><strong>${fmt(busiest.hours)} h</strong><small>Semaine ${busiest.week}</small></div><div class="weeklySummaryItem"><span>Semaine la - chargée</span><strong>${fmt(lightest.hours)} h</strong><small>Semaine ${lightest.week}</small></div>`}else weeklySummary.innerHTML='<div class="statsEmpty" style="grid-column:1/-1">Aucune semaine travaillée sur cette période.</div>';
+ document.getElementById('weeklyChart').innerHTML='';document.getElementById('siteTable').innerHTML=sites.length?`<div class="siteRow head"><div>Chantier</div><div class="num">Heures</div><div class="num">Repas</div><div class="num">IT</div></div>`+sites.map(x=>`<div class="siteRow"><div class="name">${window.antrasEscapeHtml(x.name)}</div><div class="num">${fmt(x.hours)} h</div><div class="num">${fmt(x.meals)}</div><div class="num">${fmt(x.it)}</div></div>`).join(''):'';document.getElementById('statsEmpty').hidden=matchedDays>0;
 }
-document.getElementById('weeklyChart').innerHTML='';document.getElementById('siteTable').innerHTML=sites.length?`<div class="siteRow head"><div>Chantier</div><div class="num">Heures</div><div class="num">Repas</div><div class="num">IT</div></div>`+sites.map(s=>`<div class="siteRow"><div class="name">${s.name}</div><div class="num">${fmt(s.hours)} h</div><div class="num">${fmt(s.meals)}</div><div class="num">${fmt(s.it)}</div></div>`).join(''):'';document.getElementById('statsEmpty').hidden=sheets.length>0}
 function openStats(){const saved=allSaved(),years=[...new Set(saved.map(x=>Number(x.year)).filter(Boolean))].sort((a,b)=>b-a),fallback=new Date().getFullYear();if(!years.length)years.push(fallback);const current=Number(localStorage.getItem('antras_selected_year_v1'))||years[0];yearSel.innerHTML='';[...new Set([current,...years])].sort((a,b)=>b-a).forEach(y=>{const o=document.createElement('option');o.value=y;o.textContent=y;yearSel.appendChild(o)});yearSel.value=current;periodSel.value='all';refresh();page.classList.add('open')}
 yearSel.addEventListener('change',refresh);periodSel.addEventListener('change',refresh);document.getElementById('statsBack').addEventListener('click',()=>{page.classList.remove('open');document.getElementById('dashboardScreen')?.classList.add('open')});document.getElementById('dashboardStats')?.addEventListener('click',()=>{document.getElementById('dashboardScreen')?.classList.remove('open');openStats()});
 })();
@@ -8306,7 +8305,7 @@ yearSel.addEventListener('change',refresh);periodSel.addEventListener('change',r
     sitesEditor.innerHTML=tempSites.map((s,i)=>`<div class="siteEditorRow" data-i="${i}">
       <div class="siteEditorRowHead"><strong>Chantier ${i+1}</strong>${i?'<button type="button" class="removeSiteBtn">Supprimer</button>':''}</div>
       <div class="siteEditorGrid" style="grid-template-columns:1fr">
-        <label>Chantier<input class="seName" value="${String(s.chantier||'').replace(/"/g,'&quot;')}"></label>
+        <label>Chantier<input class="seName" value="${window.antrasEscapeHtml(s.chantier||'')}"></label>
       </div>
     </div>`).join('');
     sitesEditor.querySelectorAll('.removeSiteBtn').forEach(b=>b.onclick=()=>{
@@ -8346,7 +8345,7 @@ yearSel.addEventListener('change',refresh);periodSel.addEventListener('change',r
     activeTasksRow=row;
     const selected=new Set(window.antrasGetDayTasks(row));
     const source=[...row.querySelectorAll('.taskpick option')].map(o=>o.value||o.textContent).filter(v=>v&&v!=='Choisir une tâche…');
-    taskChoices.innerHTML=source.map(t=>`<label class="taskChoice"><input type="checkbox" value="${t.replace(/"/g,'&quot;')}" ${selected.has(t)?'checked':''}><span>${t}</span></label>`).join('');
+    taskChoices.innerHTML=source.map(t=>`<label class="taskChoice"><input type="checkbox" value="${window.antrasEscapeHtml(t)}" ${selected.has(t)?'checked':''}><span>${t}</span></label>`).join('');
     tasksOverlay.classList.add('open');
   }
   function closeTasks(){tasksOverlay.classList.remove('open');activeTasksRow=null}
@@ -8575,51 +8574,13 @@ function overtimeForWeek(h,mode,rate){
   return {normal,rtt,paidHours,paidAmount,bonus};
 }
 function refresh(){
- const y=Number(yearSel.value),p=periodSel.value,mode=modeEl.value||'rtt',rate=num(rateEl.value);
- const allYearSheets=allSaved().filter(s=>Number(s.year)===y);
- const sheets=allYearSheets.filter(s=>p==='all'||monthOf(s)===Number(p));
- let hours=0,normalHours=0,rttHours=0,otHours=0,otAmount=0,otBonus=0,meals=0,itRaw=0,itDays=0,itEuros=0; const details=new Map();
- sheets.forEach(s=>{
-   const wh=weekHours(s);hours+=wh;
-   const calc=overtimeForWeek(wh,mode,rate);normalHours+=calc.normal;rttHours+=calc.rtt;otHours+=calc.paidHours;otAmount+=calc.paidAmount;otBonus+=calc.bonus;
-   (s.days||[]).forEach(d=>{
-     const raw=num(d.it);itRaw+=raw;
-     if(raw>0){itDays++;const z=itAmount(raw);itEuros+=z.amount;const cur=details.get(z.zone)||{count:0,amount:0};cur.count++;cur.amount+=z.amount;details.set(z.zone,cur)}
-   });
- });
- // Les paniers sont comptés par date réelle de journée, pas par mois de début de semaine.
- // Cela inclut correctement les jours d'un mois situés dans une semaine qui commence le mois précédent.
- if(p==='all'){
-   meals=allYearSheets.reduce((sum,s)=>sum+(s.days||[]).reduce((a,d)=>a+num(d.repas),0),0);
- }else{
-   const targetMonth=Number(p);
-   meals=allYearSheets.reduce((sum,s)=>sum+(s.days||[]).reduce((a,d)=>{
-     const parts=String(d.date||'').split('/');
-     return a+(parts.length===3&&Number(parts[1])===targetMonth?num(d.repas):0);
-   },0),0);
- }
- const monthlySelected=(p!=='all');
- // Pour un mois complet, le salaire de base est mensualisé à 151,67 h (35 h/semaine), comme sur le bulletin de paie.
- // Les heures saisies restent utilisées semaine par semaine uniquement pour déterminer RTT et heures supplémentaires.
- const paidBaseHours=monthlySelected&&sheets.length?151.67:normalHours;
- const base=paidBaseHours*rate;
- const mealUnit=12.80,mealAmount=meals*mealUnit,total=base+otAmount+mealAmount+itEuros;
- document.getElementById('salaryHours').textContent=fmt(hours)+' h';
- document.getElementById('salaryRTTHours').textContent=fmt(rttHours)+' h';
- document.getElementById('salaryOTHours').textContent=fmt(otHours)+' h';
- document.getElementById('salaryOTGain').textContent=money(otAmount);
- document.getElementById('salaryMeals').textContent=fmt(meals);
- document.getElementById('salaryITRaw').textContent=fmt(itRaw);
- document.getElementById('salaryITDays').textContent=itDays;
- document.getElementById('salaryWeeks').textContent=sheets.length;
- document.getElementById('salaryBase').textContent=money(base);
- document.getElementById('salaryOTAmount').textContent=money(otAmount);
- document.getElementById('salaryOTBonus').textContent=money(otBonus);
- document.getElementById('salaryMealAmount').textContent=money(mealAmount)+' ('+money(mealUnit)+'/repas)';
- document.getElementById('salaryITAmount').textContent=money(itEuros);
- document.getElementById('salaryTotal').textContent=money(total);
- const det=document.getElementById('salaryITDetail');
- det.innerHTML=details.size?[...details.entries()].map(([zone,x])=>`<div class="salaryITLine"><div><strong>${zone}</strong><small>${x.count} jour${x.count>1?'s':''}</small></div><strong>${money(x.amount)}</strong></div>`).join(''):'<div class="statsEmpty">Aucune IT sur cette période.</div>';
+ const y=Number(yearSel.value),p=periodSel.value,mode=modeEl.value||'rtt',rate=num(rateEl.value),target=p==='all'?null:Number(p),allYearSheets=allSaved().filter(s=>Number(s.year)===y);
+ const dayMatches=d=>{if(target===null)return true;const a=String(d.date||'').split('/');return a.length===3&&Number(a[1])===target};
+ const sheets=allYearSheets.filter(s=>(s.days||[]).some(dayMatches));let hours=0,normalHours=0,rttHours=0,otHours=0,otAmount=0,otBonus=0,meals=0,itRaw=0,itDays=0,itEuros=0;const details=new Map();
+ allYearSheets.forEach(sheet=>{let cumulative=0;(sheet.days||[]).forEach(d=>{const dh=(d.sites&&d.sites.length?d.sites:[{heures:d.heures??''}]).reduce((a,x)=>a+num(x.heures),0),start=cumulative,end=cumulative+dh;if(dayMatches(d)){hours+=dh;meals+=num(d.repas);normalHours+=Math.max(0,Math.min(end,35)-Math.min(start,35));const at25=Math.max(0,Math.min(end,43)-Math.max(start,35)),at50=Math.max(0,end-Math.max(start,43));if(mode==='rtt'){const rtt=Math.max(0,Math.min(end,39)-Math.max(start,35)),paid25=Math.max(0,Math.min(end,43)-Math.max(start,39));rttHours+=rtt;otHours+=paid25+at50;otAmount+=paid25*rate*1.25+at50*rate*1.5;otBonus+=paid25*rate*.25+at50*rate*.5}else{otHours+=at25+at50;otAmount+=at25*rate*1.25+at50*rate*1.5;otBonus+=at25*rate*.25+at50*rate*.5}const raw=num(d.it);itRaw+=raw;if(raw>0){itDays++;const z=itAmount(raw);itEuros+=z.amount;const cur=details.get(z.zone)||{count:0,amount:0};cur.count++;cur.amount+=z.amount;details.set(z.zone,cur)}}cumulative=end})});
+ const base=(target!==null&&sheets.length?151.67:normalHours)*rate,mealUnit=12.80,mealAmount=meals*mealUnit,total=base+otAmount+mealAmount+itEuros;
+ document.getElementById('salaryHours').textContent=fmt(hours)+' h';document.getElementById('salaryRTTHours').textContent=fmt(rttHours)+' h';document.getElementById('salaryOTHours').textContent=fmt(otHours)+' h';document.getElementById('salaryOTGain').textContent=money(otAmount);document.getElementById('salaryMeals').textContent=fmt(meals);document.getElementById('salaryITRaw').textContent=fmt(itRaw);document.getElementById('salaryITDays').textContent=itDays;document.getElementById('salaryWeeks').textContent=sheets.length;document.getElementById('salaryBase').textContent=money(base);document.getElementById('salaryOTAmount').textContent=money(otAmount);document.getElementById('salaryOTBonus').textContent=money(otBonus);document.getElementById('salaryMealAmount').textContent=money(mealAmount)+' ('+money(mealUnit)+'/repas)';document.getElementById('salaryITAmount').textContent=money(itEuros);document.getElementById('salaryTotal').textContent=money(total);
+ const det=document.getElementById('salaryITDetail');det.innerHTML=details.size?[...details.entries()].map(([zone,x])=>`<div class="salaryITLine"><div><strong>${zone}</strong><small>${x.count} jour${x.count>1?'s':''}</small></div><strong>${money(x.amount)}</strong></div>`).join(''):'<div class="statsEmpty">Aucune IT sur cette période.</div>';
 }
 function openSalary(){
  const saved=allSaved(),years=[...new Set(saved.map(x=>Number(x.year)).filter(Boolean))],fallback=new Date().getFullYear(),current=Number(localStorage.getItem('antras_selected_year_v1'))||fallback;
@@ -8650,7 +8611,7 @@ document.getElementById('dashboardSalary')?.addEventListener('click',()=>{docume
  function knownSites(){const m=memory();try{(JSON.parse(localStorage.getItem(HISTORY))||[]).forEach(sh=>(sh.days||[]).forEach(d=>(d.sites?.length?d.sites:[{code:d.code,chantier:d.chantier}]).forEach(s=>{const code=String(s.code||'').replace(/\D/g,'');const name=String(s.chantier||'').trim();if(name){const key=(code||name.toLowerCase());if(!m[key])m[key]={code,name,used:0}}}))) }catch(e){} return Object.values(m).sort((a,b)=>(b.used||0)-(a.used||0))}
  function autofillFromCode(r){if(r.classList.contains('has-multi-sites'))return;const c=$('.codecol textarea,.codecol input',r),n=$('.chantiercol textarea',r);if(!c||!n||n.value.trim())return;const code=c.value.replace(/\D/g,'');if(!code)return;const hit=knownSites().find(x=>x.code===code);if(hit){n.value=hit.name;r.dispatchEvent(new Event('change',{bubbles:true}))}}
  const suggest=document.createElement('div');suggest.className='siteSuggest';document.body.appendChild(suggest);
- function showSuggest(input,r){const q=input.value.trim().toLowerCase();const items=knownSites().filter(x=>!q||x.name.toLowerCase().includes(q)||x.code.includes(q.replace(/\D/g,''))).slice(0,7);if(!items.length){suggest.classList.remove('open');return}const rect=input.getBoundingClientRect();suggest.style.left=Math.max(8,Math.min(rect.left,innerWidth-240))+'px';suggest.style.top=Math.min(innerHeight-240,rect.bottom+4)+'px';suggest.innerHTML=items.map((x,i)=>`<button type="button" data-i="${i}"><strong>${x.name}</strong><small>${x.code?'Code '+x.code:'Chantier mémorisé'}</small></button>`).join('');suggest.classList.add('open');$$('button',suggest).forEach(b=>b.onclick=()=>{const x=items[+b.dataset.i];input.value=x.name;const code=$('.codecol textarea,.codecol input',r);if(code&&!code.value.trim()){code.value=x.code||'';code.dispatchEvent(new Event('input',{bubbles:true}))}r.dispatchEvent(new Event('change',{bubbles:true}));suggest.classList.remove('open')})}
+ function showSuggest(input,r){const q=input.value.trim().toLowerCase();const items=knownSites().filter(x=>!q||x.name.toLowerCase().includes(q)||x.code.includes(q.replace(/\D/g,''))).slice(0,7);if(!items.length){suggest.classList.remove('open');return}const rect=input.getBoundingClientRect();suggest.style.left=Math.max(8,Math.min(rect.left,innerWidth-240))+'px';suggest.style.top=Math.min(innerHeight-240,rect.bottom+4)+'px';suggest.innerHTML=items.map((x,i)=>`<button type="button" data-i="${i}"><strong>${window.antrasEscapeHtml(x.name)}</strong><small>${x.code?'Code '+window.antrasEscapeHtml(x.code):'Chantier mémorisé'}</small></button>`).join('');suggest.classList.add('open');$$('button',suggest).forEach(b=>b.onclick=()=>{const x=items[+b.dataset.i];input.value=x.name;const code=$('.codecol textarea,.codecol input',r);if(code&&!code.value.trim()){code.value=x.code||'';code.dispatchEvent(new Event('input',{bubbles:true}))}r.dispatchEvent(new Event('change',{bubbles:true}));suggest.classList.remove('open')})}
  document.addEventListener('click',e=>{if(!e.target.closest('.siteSuggest')&&!e.target.matches('.chantiercol textarea'))suggest.classList.remove('open')});
  function hoursOptions(selected){let out='<option value=""></option>';for(let i=0;i<=24;i++){const v=i/2;out+=`<option value="${v}" ${String(v)===String(selected)?'selected':''}>${String(v).replace('.',',')}</option>`}return out}
  function itOptions(selected){let out='<option value=""></option>';for(let i=0;i<=100;i+=5)out+=`<option value="${i}" ${String(i)===String(selected)?'selected':''}>${i}</option>`;return out}

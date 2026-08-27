@@ -31,6 +31,7 @@
 .v66-modal{background:#061c12ad;backdrop-filter:blur(7px)}
 .v66-modal>.v66-card{width:min(720px,100%);border:0;border-top:6px solid var(--v66-green);box-shadow:0 28px 80px #061c1260;animation:v66-modal-in .22s ease-out}
 .v66-modal h2{margin:0 0 5px;color:#123126;font-size:24px;letter-spacing:-.025em}
+.v66-info{margin:0 0 14px;padding:11px 13px;border:1px solid #c9e4d3;border-radius:12px;background:#edf7f1;color:#28523b;font-size:12px;font-weight:750;line-height:1.45}
 .v66-row{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}.v66-row:hover{transform:translateY(-2px);border-color:#b6cbbd;box-shadow:0 8px 22px #173d2812}
 @keyframes v66-modal-in{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.v66-shell *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}

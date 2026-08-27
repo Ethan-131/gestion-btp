@@ -1,4 +1,4 @@
-const CACHE='antras-v66-1';
+const CACHE='antras-v66-2';
 const ASSETS=[
   './',
   './index.html',
@@ -9,6 +9,7 @@ const ASSETS=[
   ,'./css/v66.css'
   ,'./js/supabase-config.js'
   ,'./js/v66-app.js'
+  ,'./js/project-catalog.js'
 ];
 
 self.addEventListener('install',event=>{

@@ -63,7 +63,9 @@ async function boot(db) {
     profile = null,
     currentPage = "home",
     previewRole = null;
+  const pageScrolls=new Map();
   const shell = el("div", { class: "v66-shell" });
+  if(/^#[a-z-]+$/.test(location.hash))currentPage=location.hash.slice(1);
   document.body.appendChild(shell);
   document.body.classList.add("v66-lock");
   const setMessage = (node, text, type = "") => {
@@ -95,9 +97,24 @@ async function boot(db) {
       syncLegacySheets().catch(() => {});
   });
   window.addEventListener("offline", () => renderOffline());
+  window.addEventListener("popstate",()=>{const next=(history.state&&history.state.page)||location.hash.slice(1)||"home";if(next!==currentPage){pageScrolls.set(currentPage,shell.scrollTop);currentPage=next;if(session&&profile?.status==="active")appScreen()}});
   window.addEventListener("antras:local-sheets-changed", () => {
     if (session && profile?.status === "active" && navigator.onLine)
       syncLegacySheets().catch(() => {});
+  });
+  window.addEventListener("message", async (event) => {
+    if (event.origin !== location.origin || event.data?.type !== "antras:timesheet-saved") return;
+    const msg=shell.querySelector("#v66SyncMessage");
+    if (!navigator.onLine) {
+      if(msg)setMessage(msg,"Fiche enregistrée sur l’appareil. Elle sera envoyée automatiquement dès que la connexion sera rétablie.","ok");
+      return;
+    }
+    try{
+      if(msg)setMessage(msg,"Enregistrement et partage avec le bureau…");
+      await syncLegacySheets();
+      if(msg)setMessage(msg,"Fiche enregistrée et partagée avec le bureau.","ok");
+      const root=shell.querySelector("#v66Content");if(root)await loadMySheets(root);
+    }catch(e){if(msg)setMessage(msg,"Fiche conservée sur l’appareil. Nouvel envoi automatique dès que possible.","error")}
   });
   function renderOffline() {
     document.querySelector(".v66-offline")?.remove();
@@ -235,7 +252,9 @@ async function boot(db) {
     shell.querySelectorAll("[data-page]").forEach(
       (b) =>
         (b.onclick = () => {
+          pageScrolls.set(currentPage,shell.scrollTop);
           currentPage = b.dataset.page;
+          history.pushState({page:currentPage},"",`#${currentPage}`);
           appScreen();
         }),
     );
@@ -248,13 +267,14 @@ async function boot(db) {
     const content = shell.querySelector("#v66Content");
     if (currentPage === "home") renderHome(content);
     if (currentPage === "accounts") renderAccounts(content);
-    if (currentPage === "review") renderSharedSheets(content, true);
-    if (currentPage === "team") renderSharedSheets(content, false);
+    if (currentPage === "review") renderSheetExplorer(content, true);
+    if (currentPage === "team") renderSheetExplorer(content, false);
     if (currentPage === "projects") renderProjects(content);
     if (currentPage === "stats") renderStats(content);
     if (currentPage === "it-settings") renderItSettings(content);
     if (currentPage === "leaves") renderLeaves(content);
     if (currentPage === "legacy") renderLegacy(content);
+    requestAnimationFrame(()=>{shell.scrollTop=pageScrolls.get(currentPage)||0});
   }
 
   function renderHome(root) {
@@ -264,7 +284,7 @@ async function boot(db) {
 
   async function renderAccounts(root) {
     root.innerHTML =
-      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Validation RH et attribution du rôle initial.</p></div></div><div class="v66-card"><div class="v66-list" id="v66Accounts"><div class="v66-empty">Chargement…</div></div></div>';
+      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Validation RH et attribution du rôle initial.</p></div></div><input class="v66-search" id="v66AccountSearch" placeholder="Rechercher par nom, prénom, e-mail ou matricule…"><div class="v66-card"><div class="v66-list" id="v66Accounts"><div class="v66-empty">Chargement…</div></div></div>';
     try {
       const [{ data, error }, { data: establishments, error: estError }] =
         await Promise.all([
@@ -280,14 +300,27 @@ async function boot(db) {
         (establishments || []).map((x) => [x.id, x.name]),
       );
       const list = root.querySelector("#v66Accounts");
-      list.innerHTML = data.length
-        ? data
+      const normalize = (value) =>
+        String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .toLowerCase()
+          .trim();
+      const paint = (query = "") => {
+        const q = normalize(query),
+          filtered = data.filter((p) =>
+            normalize(
+              `${p.first_name || ""} ${p.last_name || ""} ${p.email || ""} ${p.employee_number || ""}`,
+            ).includes(q),
+          );
+      list.innerHTML = filtered.length
+        ? filtered
             .map(
               (p) =>
                 `<article class="v66-row" data-id="${p.id}"><div><strong>${esc(fullName(p))}</strong><small>${esc(p.email)}${p.employee_number ? " · " + esc(p.employee_number) : ""}</small></div><div><span class="v66-pill ${esc(p.status)}">${esc(statusLabels[p.status] || p.status)}</span><small>${esc(roleLabels[p.role] || "Rôle non attribué")} · ${esc(establishmentNames.get(p.establishment_id) || "Siège non attribué")}</small></div><div class="v66-actions">${p.status === "pending" ? '<button class="v66-btn primary" data-approve>Valider</button><button class="v66-btn danger" data-reject>Refuser</button>' : '<button class="v66-btn" data-edit-account>Modifier</button>'}</div></article>`,
             )
             .join("")
-        : '<div class="v66-empty">Aucun compte.</div>';
+        : `<div class="v66-empty">${q ? "Aucun salarié ne correspond à cette recherche." : "Aucun compte."}</div>`;
       list
         .querySelectorAll("[data-approve]")
         .forEach(
@@ -310,6 +343,10 @@ async function boot(db) {
               establishments,
             )),
       );
+      };
+      paint();
+      root.querySelector("#v66AccountSearch").oninput = (event) =>
+        paint(event.target.value);
     } catch (e) {
       root.querySelector("#v66Accounts").innerHTML =
         `<div class="v66-empty">${esc(e.message)}</div>`;
@@ -659,10 +696,10 @@ async function boot(db) {
               if (canReview && r.status === "cancellation_requested")
                 actions =
                   '<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>';
-              if (own && r.status === "pending")
+              if (own && !canReview && r.status === "pending")
                 actions =
                   '<button class="v66-btn danger" data-leave-cancel="cancelled">Annuler la demande</button>';
-              if (own && r.status === "approved")
+              if (own && !canReview && r.status === "approved")
                 actions =
                   '<button class="v66-btn danger" data-leave-cancel="cancellation_requested">Demander l’annulation</button>';
               return `<article class="v66-card v66-leave-card" data-id="${r.id}"><div class="v66-pagehead"><div><strong>${esc(fullName(r.profiles))}${showType ? ` · ${esc(requestType)}` : " · Absence"}</strong><p>${total.toLocaleString("fr-FR")} jour${total > 1 ? "s" : ""}${r.created_by_rh ? " · Créée par les RH" : ""}</p></div><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status] || r.status)}</span></div><div class="v66-periods">${(
@@ -1048,6 +1085,119 @@ async function boot(db) {
     }
   }
 
+  const sheetLabels = {
+    draft: "Brouillon",
+    submitted: "Envoyée",
+    pending_review: "À valider",
+    rejected: "À corriger",
+    validated: "Validée",
+    changed_after_validation: "À valider",
+  };
+  const monthLabels = [
+    "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+    "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre",
+  ];
+  function isoWeekBounds(year, week) {
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const monday = new Date(jan4);
+    monday.setUTCDate(jan4.getUTCDate() - (jan4.getUTCDay() || 7) + 1 + (week - 1) * 7);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    return { monday, sunday };
+  }
+  const dateKey = (d) => d.toISOString().slice(0, 10);
+  function weekTitle(year, week) {
+    const { monday, sunday } = isoWeekBounds(year, week);
+    return `Semaine ${week} — ${monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" })} au ${sunday.toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" })}`;
+  }
+  function currentIsoWeek() {
+    const now = new Date(), d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+    d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+    const year = d.getUTCFullYear(), first = new Date(Date.UTC(year, 0, 1));
+    return { year, week: Math.ceil((((d - first) / 86400000) + 1) / 7) };
+  }
+
+  async function renderSheetExplorer(root, canReview) {
+    const role = visibleRole();
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches partagées" : "Fiches équipes"}</h1><p>Année → mois → semaine → salariés. Le détail est chargé uniquement à l’ouverture.</p></div></div><div class="v66-filterbar"><input class="v66-search" id="v66SheetSearch" placeholder="Rechercher un salarié…"><select id="v66SheetFilter"><option value="all">Toutes</option><option value="missing">À recevoir / manquantes</option><option value="received">Reçues</option><option value="pending">À traiter</option><option value="validated">Validées</option><option value="rejected">Refusées</option><option value="absent">Absents / dispensés</option></select></div><div id="v66SheetTree" class="v66-tree"><div class="v66-card v66-empty">Chargement de l’index léger…</div></div>`;
+    try {
+      let query = db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,submitted_at,reviewed_at,profiles!timesheets_employee_id_fkey(first_name,last_name,email)")
+        .order("iso_year", { ascending: false }).order("iso_week", { ascending: false }).limit(500);
+      if (canReview) query = query.neq("status", "draft");
+      const { data, error } = await query;
+      if (error) throw error;
+      const weeks = new Map();
+      (data || []).forEach((s) => {
+        const key = `${s.iso_year}-${s.iso_week}`;
+        if (!weeks.has(key)) weeks.set(key, { year: s.iso_year, week: s.iso_week, sheets: [] });
+        weeks.get(key).sheets.push(s);
+      });
+      const now = currentIsoWeek(), nowKey = `${now.year}-${now.week}`;
+      if (!weeks.has(nowKey)) weeks.set(nowKey, { ...now, sheets: [] });
+      const ordered = [...weeks.values()].sort((a,b) => b.year-a.year || b.week-a.week);
+      const byYear = new Map();
+      ordered.forEach((w) => {
+        const month = isoWeekBounds(w.year,w.week).monday.getUTCMonth();
+        if (!byYear.has(w.year)) byYear.set(w.year,new Map());
+        if (!byYear.get(w.year).has(month)) byYear.get(w.year).set(month,[]);
+        byYear.get(w.year).get(month).push(w);
+      });
+      const tree = root.querySelector("#v66SheetTree");
+      tree.innerHTML = [...byYear].map(([year,months],yi) => `<details class="v66-folder" ${yi===0?"open":""}><summary>${year}</summary>${[...months].map(([month,rows],mi)=>`<details class="v66-folder month" ${yi===0&&mi===0?"open":""}><summary>${monthLabels[month]}</summary>${rows.map(w=>`<section class="v66-week" data-year="${w.year}" data-week="${w.week}"><button type="button" class="v66-week-open"><span>${weekTitle(w.year,w.week)}</span><small>${w.sheets.length} fiche${w.sheets.length>1?"s":""} reçue${w.sheets.length>1?"s":""}</small></button><div class="v66-week-body"></div></section>`).join("")}</details>`).join("")}</details>`).join("");
+      tree.querySelectorAll(".v66-week-open").forEach((button) => button.onclick = async () => {
+        const weekNode = button.closest(".v66-week"), body = weekNode.querySelector(".v66-week-body");
+        if (weekNode.classList.toggle("open")) await loadWeekRoster(weekNode, body, canReview, role);
+      });
+    } catch (e) { root.querySelector("#v66SheetTree").innerHTML = `<div class="v66-card v66-empty">${esc(e.message)}</div>`; }
+  }
+
+  async function loadWeekRoster(node, body, canReview, role) {
+    body.innerHTML = '<div class="v66-card v66-empty">Chargement du résumé…</div>';
+    const year=Number(node.dataset.year), week=Number(node.dataset.week);
+    try {
+      let rows;
+      if (canReview || role === "admin") {
+        const { data, error } = await db.rpc("week_timesheet_roster", { target_year: year, target_week: week });
+        if (error) throw error; rows=data||[];
+      } else {
+        const { data, error } = await db.from("timesheets").select("timesheet_id:id,employee_id,sheet_status:status,rejection_reason,profiles!timesheets_employee_id_fkey(first_name,last_name,email)").eq("iso_year",year).eq("iso_week",week);
+        if (error) throw error;
+        rows=(data||[]).map(x=>({...x,...x.profiles,expected:true,absent_full_week:false}));
+      }
+      const counts={expected:rows.filter(x=>x.expected).length,validated:rows.filter(x=>x.sheet_status==="validated").length,pending:rows.filter(x=>["submitted","pending_review","changed_after_validation"].includes(x.sheet_status)).length,rejected:rows.filter(x=>x.sheet_status==="rejected").length,absent:rows.filter(x=>x.absent_full_week).length};
+      const rate=counts.expected?counts.validated/counts.expected*100:100;
+      body.innerHTML=`<div class="v66-week-summary"><strong>${counts.expected} fiches attendues sur ${rows.length} salariés</strong><span>${counts.validated} validées</span><span>${counts.pending} à traiter</span><span>${counts.rejected} refusées</span><span>${counts.absent} dispensés</span><b>${rate.toLocaleString("fr-FR",{maximumFractionDigits:1})} % validées</b></div><div class="v66-employee-list"></div>`;
+      const list=body.querySelector(".v66-employee-list"), search=rootQuery("#v66SheetSearch"), filter=rootQuery("#v66SheetFilter");
+      const paint=()=>{
+        const q=normalizeSearch(search?.value), f=filter?.value||"all";
+        const filtered=rows.filter(r=>{
+          const status=r.absent_full_week?"absent":!r.timesheet_id?"missing":["submitted","pending_review","changed_after_validation"].includes(r.sheet_status)?"pending":r.sheet_status;
+          const matchFilter=f==="all"||(f==="received"&&!!r.timesheet_id)||f===status;
+          return matchFilter&&normalizeSearch(`${r.first_name||""} ${r.last_name||""}`).includes(q);
+        });
+        list.innerHTML=filtered.map(r=>{const status=r.absent_full_week?"Dispensé — absence validée":!r.timesheet_id?"À recevoir":sheetLabels[r.sheet_status]||r.sheet_status;return `<button type="button" class="v66-employee" ${r.timesheet_id?`data-sheet-id="${r.timesheet_id}"`:"disabled"}><span><strong>${esc(`${r.first_name||""} ${r.last_name||""}`.trim()||r.email)}</strong><small>${r.rejection_reason?`Motif : ${esc(r.rejection_reason)}`:"Touchez pour ouvrir la fiche"}</small></span><span class="v66-pill ${esc(r.sheet_status||"")}">${esc(status)}</span></button>`}).join("")||'<div class="v66-empty">Aucun résultat.</div>';
+        list.querySelectorAll("[data-sheet-id]").forEach(b=>{b.onclick=()=>openTimesheetDetail(b.dataset.sheetId,canReview);b.ondblclick=b.onclick});
+      };
+      if(search)search.addEventListener("input",paint);if(filter)filter.addEventListener("change",paint);paint();
+    } catch(e){body.innerHTML=`<div class="v66-card v66-empty">${esc(e.message)}</div>`}
+  }
+  function rootQuery(selector){return shell.querySelector(selector)}
+  function normalizeSearch(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()}
+
+  async function openTimesheetDetail(id, canReview) {
+    const modal=el("div",{class:"v66-modal"},'<div class="v66-card"><div class="v66-empty">Chargement de la fiche…</div></div>');document.body.appendChild(modal);
+    try{
+      const [{data:s,error},{data:zones,error:ze}]=await Promise.all([
+        db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single(),
+        canReview?db.from("it_zones").select("id,label").eq("active",true).order("label"):Promise.resolve({data:[],error:null})
+      ]);if(error)throw error;if(ze)throw ze;
+      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0);
+      modal.innerHTML=`<article class="v66-card v66-sheet-detail" data-id="${s.id}"><div class="v66-pagehead"><div><h2>${esc(fullName(s.profiles))}</h2><p>${weekTitle(s.iso_year,s.iso_week)} · ${hours.toLocaleString("fr-FR")} h</p></div><button class="v66-btn" data-close>Fermer</button></div><div class="v66-list">${(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>`<div class="v66-row"><div><strong>${fmtDate(d.work_date)}</strong><small>${(d.timesheet_sites||[]).map(x=>`${esc(x.project_code_snapshot)} ${esc(x.project_name_snapshot)} — ${Number(x.hours||0).toLocaleString("fr-FR")} h ${x.project_id?"":'<em class="v66-unreferenced">Chantier non référencé</em>'}`).join("<br>")||"Aucun chantier"}</small></div><div><small>Repas : ${Number(d.meal||0).toLocaleString("fr-FR")}</small><small>IT : ${esc(d.it_zone_label_snapshot||"Non renseignée")}</small><small>${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"Aucune tâche")}</small></div></div>`).join("")}</div>${s.observations?`<p class="v66-info">${esc(s.observations)}</p>`:""}${canReview&&["submitted","pending_review","changed_after_validation"].includes(s.status)?'<div class="v66-actions"><button class="v66-btn danger" data-review="rejected">Refuser</button><button class="v66-btn primary" data-review="validated">Valider</button></div>':""}</article>`;
+      modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.onclick=e=>{if(e.target===modal)modal.remove()};
+      modal.querySelectorAll("[data-review]").forEach(b=>b.onclick=async()=>{const decision=b.dataset.review,reason=decision==="rejected"?prompt("Motif du refus :")||"":"";if(decision==="rejected"&&!reason.trim())return;b.disabled=true;const{error}=await db.rpc("review_timesheet",{target_id:id,decision,reason});if(error){fail(error);b.disabled=false;return}toast(decision==="validated"?"Fiche validée.":"Fiche refusée.");modal.remove();appScreen()});
+    }catch(e){modal.innerHTML=`<div class="v66-card"><button class="v66-btn" data-close>Fermer</button><div class="v66-empty">${esc(e.message)}</div></div>`;modal.querySelector("[data-close]").onclick=()=>modal.remove()}
+  }
+
   async function renderSharedSheets(root, canReview) {
     const role = visibleRole();
     root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Validations RH" : role === "admin" ? "Toutes les fiches" : "Fiches de mes chantiers"}</h1><p>${canReview ? "Fiches envoyées, modifiées, validées ou refusées." : role === "admin" ? "Accès technique à toutes les données." : "Lecture seule : identité, heures, repas, IT et tâches."}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
@@ -1355,21 +1505,8 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Saisie locale, synchronisation automatique et envoi aux RH.</p></div></div><div class="v66-card"><p class="v66-help">La fiche reste enregistrée sur ce téléphone en cas de coupure. Dès que le réseau revient, elle est copiée dans l’espace sécurisé.</p><div class="v66-actions" style="justify-content:flex-start"><button class="v66-btn primary" id="v66OpenLegacy">Ouvrir la saisie</button><button class="v66-btn" id="v66Sync">Synchroniser maintenant</button></div><div class="v66-message" id="v66SyncMessage"></div></div><div class="v66-list" id="v66MySheets" style="margin-top:12px"><div class="v66-card v66-empty">Chargement…</div></div>`;
-    root.querySelector("#v66OpenLegacy").onclick = () => {
-      location.href = "index.html";
-    };
-    root.querySelector("#v66Sync").onclick = async () => {
-      const msg = root.querySelector("#v66SyncMessage");
-      setMessage(msg, "Synchronisation…");
-      try {
-        const count = await syncLegacySheets();
-        setMessage(msg, `${count} fiche(s) synchronisée(s).`, "ok");
-        await loadMySheets(root);
-      } catch (e) {
-        setMessage(msg, e.message, "error");
-      }
-    };
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>La saisie, l’enregistrement et le partage restent dans cette application.</p></div><button class="v66-btn primary" id="v66ToggleEditor">Nouvelle fiche</button></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-editor-wrap v66-hidden" id="v66EditorWrap"><iframe class="v66-editor-frame" title="Saisie de la fiche d’heures" loading="lazy" data-src="index.html?embedded=1"></iframe></div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
+    root.querySelector("#v66ToggleEditor").onclick=()=>{const wrap=root.querySelector("#v66EditorWrap"),frame=wrap.querySelector("iframe"),open=wrap.classList.toggle("v66-hidden");if(!open&&!frame.src)frame.src=frame.dataset.src;root.querySelector("#v66ToggleEditor").textContent=open?"Nouvelle fiche":"Masquer la saisie"};
     try {
       if (navigator.onLine) await syncLegacySheets();
       await loadMySheets(root);
@@ -1398,104 +1535,19 @@ async function boot(db) {
     // Un conducteur reste aussi un salarié de l'entreprise : il doit pouvoir
     // synchroniser et envoyer ses propres fiches tout en conservant ses droits
     // supplémentaires sur les chantiers.
-    if (!["salarie", "conducteur"].includes(profile.role)) return 0;
-    const sheets = localSheets();
+    if (!["salarie", "conducteur", "rh", "admin"].includes(profile.role)) return 0;
+    const sheets = localSheets(), stateKey="antras_sync_state_v3";
     if (!sheets.length) return 0;
-    const { data: projects, error: projectError } = await db
-      .from("projects")
-      .select("id,code,name");
-    if (projectError) throw projectError;
-    const byCode = new Map(
-      projects.map((p) => [String(p.code).replace(/\W/g, "").toLowerCase(), p]),
-    );
-    const byName = new Map(
-      projects.map((p) => [String(p.name).trim().toLowerCase(), p]),
-    );
+    let state={};try{state=JSON.parse(localStorage.getItem(stateKey)||"{}")||{}}catch{}
+    let sent=0;
     for (const local of sheets) {
-      const row = {
-        employee_id: profile.id,
-        iso_year: Number(local.year),
-        iso_week: Number(local.week),
-        observations: local.obs || "",
-      };
-      const { data: sheet, error } = await db
-        .from("timesheets")
-        .upsert(row, { onConflict: "employee_id,iso_year,iso_week" })
-        .select("id,status")
-        .single();
-      if (error) throw error;
-      const { error: deleteError } = await db
-        .from("timesheet_days")
-        .delete()
-        .eq("timesheet_id", sheet.id);
-      if (deleteError) throw deleteError;
-      for (const day of local.days || []) {
-        const workDate = isoDate(day.date);
-        if (!workDate) continue;
-        const legacyIt =
-          !day.itZoneLabel && Number.isFinite(Number(day.it))
-            ? Number(day.it)
-            : 0;
-        const { data: newDay, error: dayError } = await db
-          .from("timesheet_days")
-          .insert({
-            timesheet_id: sheet.id,
-            work_date: workDate,
-            meal: Number(day.repas || 0),
-            travel_km: legacyIt,
-            it_zone_id: day.itZoneId || null,
-            it_zone_label_snapshot: day.itZoneLabel || null,
-            it_needs_review: !!day.itNeedsReview,
-            establishment_id_snapshot: profile.establishment_id || null,
-            tasks: day.tasks?.length ? day.tasks : day.task ? [day.task] : [],
-            manual_task: day.manual || "",
-            vehicle: day.vehicle || "",
-            delivery_note: day.bon || "",
-          })
-          .select("id")
-          .single();
-        if (dayError) throw dayError;
-        const sites = day.sites?.length
-          ? day.sites
-          : [
-              {
-                code: day.code || "",
-                chantier: day.chantier || "",
-                heures: day.heures ?? "",
-              },
-            ];
-        const rows = sites
-          .filter((s) => s.code || s.chantier || Number(s.heures || 0))
-          .map((s, position) => {
-            const hit =
-              byCode.get(
-                String(s.code || "")
-                  .replace(/\W/g, "")
-                  .toLowerCase(),
-              ) ||
-              byName.get(
-                String(s.chantier || "")
-                  .trim()
-                  .toLowerCase(),
-              );
-            return {
-              day_id: newDay.id,
-              project_id: hit?.id || null,
-              project_code_snapshot: s.code || hit?.code || "",
-              project_name_snapshot: s.chantier || hit?.name || "",
-              hours: Number(s.heures || 0),
-              position,
-            };
-          });
-        if (rows.length) {
-          const { error: siteError } = await db
-            .from("timesheet_sites")
-            .insert(rows);
-          if (siteError) throw siteError;
-        }
-      }
+      const key=`${local.year}-${local.week}`,revision=local.savedAt||JSON.stringify(local).length;
+      if(state[key]===revision)continue;
+      const payload={iso_year:Number(local.year),iso_week:Number(local.week),observations:local.obs||"",days:(local.days||[]).map(day=>({work_date:isoDate(day.date),meal:Number(day.repas||0),travel_km:!day.itZoneLabel&&Number.isFinite(Number(day.it))?Number(day.it):0,it_zone_id:day.itZoneId||null,it_zone_label_snapshot:day.itZoneLabel||null,it_needs_review:!!day.itNeedsReview,establishment_id_snapshot:profile.establishment_id||null,tasks:day.tasks?.length?day.tasks:day.task?[day.task]:[],manual_task:day.manual||"",vehicle:day.vehicle||"",delivery_note:day.bon||"",sites:(day.sites?.length?day.sites:[{code:day.code||"",chantier:day.chantier||"",heures:day.heures??""}]).filter(s=>s.code||s.chantier||Number(s.heures||0)).map((s,position)=>({code:s.code||"",name:s.chantier||"",hours:Number(s.heures||0),position}))})).filter(d=>d.work_date)};
+      const {error}=await db.rpc("save_and_submit_timesheet",{payload});if(error)throw error;
+      state[key]=revision;localStorage.setItem(stateKey,JSON.stringify(state));sent++;
     }
-    return sheets.length;
+    return sent;
   }
 
   async function loadMySheets(root) {
@@ -1506,33 +1558,13 @@ async function boot(db) {
       .order("iso_year", { ascending: false })
       .order("iso_week", { ascending: false });
     if (error) throw error;
-    const box = root.querySelector("#v66MySheets");
-    box.innerHTML = data.length
-      ? data
-          .map(
-            (s) =>
-              `<article class="v66-card v66-row" data-id="${s.id}"><div><strong>Semaine ${s.iso_week} — ${s.iso_year}</strong><small>Version ${s.version}${s.rejection_reason ? " · Motif : " + esc(s.rejection_reason) : ""}</small></div><div><span class="v66-pill ${esc(s.status)}">${esc({ draft: "Brouillon", submitted: "Envoyée", pending_review: "En attente RH", rejected: "Refusée", validated: "Validée", changed_after_validation: "Modifiée — à renvoyer" }[s.status] || s.status)}</span></div><div class="v66-actions">${["draft", "rejected", "changed_after_validation"].includes(s.status) ? '<button class="v66-btn primary" data-submit>Envoyer aux RH</button>' : ""}</div></article>`,
-          )
-          .join("")
-      : '<div class="v66-card v66-empty">Aucune fiche synchronisée.</div>';
-    box.querySelectorAll("[data-submit]").forEach(
-      (b) =>
-        (b.onclick = async () => {
-          b.disabled = true;
-          try {
-            const { error } = await db.rpc("submit_timesheet", {
-              target_id: b.closest("[data-id]").dataset.id,
-            });
-            if (error) throw error;
-            toast("Fiche envoyée aux RH.");
-            await loadMySheets(root);
-          } catch (e) {
-            fail(e);
-          } finally {
-            b.disabled = false;
-          }
-        }),
-    );
+    const box = root.querySelector("#v66MySheets"), search=root.querySelector("#v66MySheetSearch");
+    const paint=(query="")=>{
+      const q=normalizeSearch(query), grouped=new Map();
+      data.filter(s=>normalizeSearch(`${s.iso_year} ${monthLabels[isoWeekBounds(s.iso_year,s.iso_week).monday.getUTCMonth()]} semaine ${s.iso_week} ${sheetLabels[s.status]||s.status}`).includes(q)).forEach(s=>{const month=isoWeekBounds(s.iso_year,s.iso_week).monday.getUTCMonth();if(!grouped.has(s.iso_year))grouped.set(s.iso_year,new Map());if(!grouped.get(s.iso_year).has(month))grouped.get(s.iso_year).set(month,[]);grouped.get(s.iso_year).get(month).push(s)});
+      box.innerHTML=grouped.size?[...grouped].map(([year,months],yi)=>`<details class="v66-folder" ${yi===0?"open":""}><summary>${year}</summary>${[...months].map(([month,sheets],mi)=>`<details class="v66-folder month" ${yi===0&&mi===0?"open":""}><summary>${monthLabels[month]}</summary>${sheets.map(s=>`<button type="button" class="v66-employee" data-sheet-id="${s.id}"><span><strong>${weekTitle(s.iso_year,s.iso_week)}</strong><small>Version ${s.version}${s.rejection_reason?` · Motif : ${esc(s.rejection_reason)}`:""}</small></span><span class="v66-pill ${esc(s.status)}">${esc(sheetLabels[s.status]||s.status)}</span></button>`).join("")}</details>`).join("")}</details>`).join(""):'<div class="v66-card v66-empty">Aucune fiche trouvée.</div>';
+      box.querySelectorAll("[data-sheet-id]").forEach(b=>b.onclick=()=>openTimesheetDetail(b.dataset.sheetId,false));
+    };paint();if(search)search.oninput=e=>paint(e.target.value);
   }
 
   db.auth.onAuthStateChange(async (_event, nextSession) => {

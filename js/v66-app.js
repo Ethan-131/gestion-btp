@@ -62,7 +62,8 @@ async function boot(db) {
   let session = null,
     profile = null,
     currentPage = "home",
-    previewRole = null;
+    previewRole = null,
+    routeIntent = null;
   const pageScrolls=new Map();
   const shell = el("div", { class: "v66-shell" });
   if(/^#[a-z-]+$/.test(location.hash))currentPage=location.hash.slice(1);
@@ -90,6 +91,13 @@ async function boot(db) {
     "ethan.mijalkovic1@gmail.com";
   const visibleRole = () =>
     isEthan() && previewRole ? previewRole : profile?.role;
+  const navigateTo = (page, intent = null) => {
+    pageScrolls.set(currentPage, shell.scrollTop);
+    routeIntent = intent;
+    currentPage = page;
+    history.pushState({ page: currentPage }, "", `#${currentPage}`);
+    appScreen();
+  };
 
   window.addEventListener("online", () => {
     renderOffline();
@@ -252,10 +260,7 @@ async function boot(db) {
     shell.querySelectorAll("[data-page]").forEach(
       (b) =>
         (b.onclick = () => {
-          pageScrolls.set(currentPage,shell.scrollTop);
-          currentPage = b.dataset.page;
-          history.pushState({page:currentPage},"",`#${currentPage}`);
-          appScreen();
+          navigateTo(b.dataset.page);
         }),
     );
     shell.querySelector("#v66Logout").onclick = () => db.auth.signOut();
@@ -277,9 +282,40 @@ async function boot(db) {
     requestAnimationFrame(()=>{shell.scrollTop=pageScrolls.get(currentPage)||0});
   }
 
-  function renderHome(root) {
+  async function renderHome(root) {
     const role = visibleRole();
-    root.innerHTML = `<section class="v66-page"><div class="v66-pagehead"><div><h1>Bonjour ${esc(profile.first_name || "")}</h1><p>Ton espace est adapté au rôle ${esc(roleLabels[role])}.</p></div></div><div class="v66-stats"><div class="v66-stat"><small>Compte</small><strong>Actif</strong></div><div class="v66-stat"><small>Rôle affiché</small><strong style="font-size:16px">${esc(roleLabels[role])}</strong></div><div class="v66-stat"><small>Connexion</small><strong style="font-size:16px">${navigator.onLine ? "En ligne" : "Hors ligne"}</strong></div></div><div class="v66-card"><h2>Prochaine étape</h2><p class="v66-help">${role === "rh" ? "Valide les demandes de comptes, attribue les rôles, puis crée les chantiers." : role === "admin" ? "Configure les chantiers et contrôle les données techniques." : role === "conducteur" ? "Tu pourras consulter les fiches contenant au moins un chantier qui t’est attribué." : "Utilise la page Fiches d’heures pour saisir et envoyer ta semaine."}</p></div></section>`;
+    root.innerHTML = `<section class="v66-page"><div class="v66-pagehead"><div><h1>Bonjour ${esc(profile.first_name || "")}</h1><p>Voici les actions utiles pour ton rôle ${esc(roleLabels[role])}.</p></div></div><div class="v66-dashboard" id="v66Dashboard"><div class="v66-card v66-empty">Chargement de ton tableau de bord…</div></div></section>`;
+    const dashboard = root.querySelector("#v66Dashboard");
+    try {
+      if (role === "rh") {
+        const now = currentIsoWeek(), previousDate = new Date(isoWeekBounds(now.year, now.week).monday);
+        previousDate.setUTCDate(previousDate.getUTCDate() - 7);
+        const previous = isoWeekFromDate(previousDate);
+        const [accounts, leaves, roster] = await Promise.all([
+          db.from("profiles").select("id", { count: "exact", head: true }).eq("status", "pending"),
+          db.from("leave_requests").select("id", { count: "exact", head: true }).in("status", ["pending", "cancellation_requested"]),
+          db.rpc("week_timesheet_roster", { target_year: previous.year, target_week: previous.week }),
+        ]);
+        if (accounts.error) throw accounts.error;if (leaves.error) throw leaves.error;if (roster.error) throw roster.error;
+        const missing = (roster.data || []).filter((r) => r.expected && !r.timesheet_id).length;
+        dashboard.innerHTML = `<button class="v66-action-card" data-go="accounts"><span>Comptes en attente</span><strong>${accounts.count || 0}</strong><small>Valider ou refuser les demandes</small></button><button class="v66-action-card" data-go="leaves"><span>Congés & RTT à traiter</span><strong>${leaves.count || 0}</strong><small>Ouvrir les demandes récentes</small></button><button class="v66-action-card" data-go="review"><span>Fiches manquantes</span><strong>${missing}</strong><small>${esc(weekTitle(previous.year, previous.week))}</small></button>`;
+        dashboard.querySelector('[data-go="accounts"]').onclick=()=>navigateTo("accounts",{status:"pending"});
+        dashboard.querySelector('[data-go="leaves"]').onclick=()=>navigateTo("leaves",{group:"pending"});
+        dashboard.querySelector('[data-go="review"]').onclick=()=>navigateTo("review",{year:previous.year,week:previous.week,filter:"missing"});
+      } else if (role === "conducteur") {
+        const { data: projects, error } = await db.from("projects").select("id,code,name,planned_end_date,planned_hours,status,project_conductors!inner(conductor_id)").eq("project_conductors.conductor_id",profile.id).in("status",["active","overdue"]).order("planned_end_date",{ascending:true}).limit(8);
+        if(error)throw error;
+        const ids=(projects||[]).map(p=>p.id);let actual=new Map();
+        if(ids.length){const {data:sites,error:se}=await db.from("timesheet_sites").select("project_id,hours").in("project_id",ids);if(se)throw se;(sites||[]).forEach(x=>actual.set(x.project_id,(actual.get(x.project_id)||0)+Number(x.hours||0)))}
+        dashboard.innerHTML = (projects||[]).length ? `<div class="v66-card v66-dashboard-wide"><h2>Chantiers en cours</h2><div class="v66-list">${projects.map(p=>{const used=actual.get(p.id)||0,pct=Number(p.planned_hours)>0?Math.round(used/Number(p.planned_hours)*100):0;return `<button class="v66-project-shortcut" data-project="${p.id}"><span><strong>${esc(p.code)} — ${esc(p.name)}</strong><small>Fin prévue : ${fmtDate(p.planned_end_date)}</small></span><span><b>${pct}%</b><small>${used.toLocaleString("fr-FR")} / ${Number(p.planned_hours||0).toLocaleString("fr-FR")} h</small></span></button>`}).join("")}</div></div>` : '<div class="v66-card v66-empty">Aucun chantier en cours ne t’est attribué.</div>';
+        dashboard.querySelectorAll("[data-project]").forEach(b=>b.onclick=()=>navigateTo("stats",{projectId:b.dataset.project}));
+      } else {
+        const now=currentIsoWeek(),{data,error}=await db.from("timesheets").select("id,status,iso_year,iso_week").eq("employee_id",profile.id).eq("iso_year",now.year).eq("iso_week",now.week).maybeSingle();if(error)throw error;
+        const editable=!data||["draft","rejected","changed_after_validation"].includes(data.status),label=!data?"Remplir ma fiche":editable?"Continuer ma fiche":"Voir ma fiche";
+        dashboard.innerHTML=`<button class="v66-action-card v66-primary-action" id="v66HomeSheet"><span>${esc(weekTitle(now.year,now.week))}</span><strong>${esc(label)}</strong><small>${data?esc(sheetLabels[data.status]||data.status):"Aucune fiche commencée"}</small></button>`;
+        dashboard.querySelector("#v66HomeSheet").onclick=()=>navigateTo("legacy",{year:now.year,week:now.week,open:true});
+      }
+    } catch(e){dashboard.innerHTML=`<div class="v66-card v66-empty">Impossible de charger le tableau de bord : ${esc(e.message)}</div>`}
   }
 
   async function renderAccounts(root) {
@@ -299,19 +335,15 @@ async function boot(db) {
       const establishmentNames = new Map(
         (establishments || []).map((x) => [x.id, x.name]),
       );
+      const pendingOnly=routeIntent?.status==="pending";if(pendingOnly)routeIntent=null;
       const list = root.querySelector("#v66Accounts");
-      const normalize = (value) =>
-        String(value || "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .trim();
       const paint = (query = "") => {
-        const q = normalize(query),
-          filtered = data.filter((p) =>
-            normalize(
+        const q = normalizeSearch(query),
+          filtered = data.filter((p) => (!pendingOnly||p.status==="pending")&&
+            smartSearchMatch(
               `${p.first_name || ""} ${p.last_name || ""} ${p.email || ""} ${p.employee_number || ""}`,
-            ).includes(q),
+              q,
+            ),
           );
       list.innerHTML = filtered.length
         ? filtered
@@ -711,19 +743,13 @@ async function boot(db) {
                   "",
                 )}</div>${r.employee_comment ? `<p class="v66-help">${esc(r.employee_comment)}</p>` : ""}${r.rejection_reason ? `<div class="v66-info">Motif : ${esc(r.rejection_reason)}</div>` : ""}${actions ? `<div class="v66-actions" style="margin-top:12px">${actions}</div>` : ""}</article>`;
       };
-      const cleanSearch = (value) =>
-        String(value || "")
-          .normalize("NFD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .toLowerCase()
-          .trim();
       if (canReview) {
         list.innerHTML = `<input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié par nom ou prénom…"><div id="v66LeaveGroups"></div>`;
         const groupsNode = list.querySelector("#v66LeaveGroups");
         const paintGroups = (query = "") => {
-          const q = cleanSearch(query),
+          const q = normalizeSearch(query),
             filtered = requests.filter((r) =>
-              cleanSearch(fullName(r.profiles)).includes(q),
+              smartSearchMatch(fullName(r.profiles), q),
             ),
             groups = [
               {
@@ -746,11 +772,11 @@ async function boot(db) {
                 ),
               },
             ];
-          groupsNode.innerHTML = groups
+          groupsNode.innerHTML = filtered.length ? groups
             .map(
               (g) => `<section class="v66-leave-group" data-group="${g.id}"><div class="v66-leave-group-head"><div><h3>${g.title}</h3><small>${g.rows.length} demande${g.rows.length > 1 ? "s" : ""}</small></div>${g.rows.length > 1 ? `<button type="button" class="v66-btn" data-expand>Voir toutes</button>` : ""}</div><div class="v66-list">${g.rows.length ? g.rows.map((r, i) => `<div class="${i ? "v66-leave-extra" : ""}">${cardHtml(r)}</div>`).join("") : '<div class="v66-card v66-empty">Aucune demande.</div>'}</div></section>`,
             )
-            .join("");
+            .join("") : '<div class="v66-card v66-empty">Aucun salarié trouvé.</div>';
           groupsNode.querySelectorAll("[data-expand]").forEach((button) => {
             button.onclick = () => {
               const group = button.closest(".v66-leave-group"),
@@ -763,6 +789,7 @@ async function boot(db) {
         list.querySelector("#v66LeaveSearch").oninput = (e) =>
           paintGroups(e.target.value);
         paintGroups();
+        if(routeIntent?.group==="pending"){routeIntent=null;list.querySelector('[data-group="pending"]')?.scrollIntoView({behavior:"smooth",block:"start"})}
       } else {
         list.innerHTML = requests.length
           ? requests.map(cardHtml).join("")
@@ -796,29 +823,25 @@ async function boot(db) {
       );
       list.querySelectorAll("[data-leave-cancel]").forEach(
         (b) =>
-          (b.onclick = async () => {
-            if (
-              !confirm(
-                b.dataset.leaveCancel === "cancelled"
-                  ? "Annuler cette demande ?"
-                  : "Envoyer une demande d’annulation aux RH ?",
-              )
-            )
-              return;
-            try {
+          (b.onclick = () => {
+            const next=b.dataset.leaveCancel,id=b.closest("[data-id]").dataset.id;
+            const modal=el("div",{class:"v66-modal"},`<div class="v66-card v66-form"><h2>${next==="cancelled"?"Annuler cette demande ?":"Demander l’annulation ?"}</h2><p class="v66-help">${next==="cancelled"?"La demande ne sera plus transmise aux RH.":"La demande restera acceptée jusqu’à la décision des RH."}</p><div class="v66-actions"><button class="v66-btn" data-close>Conserver l’absence</button><button class="v66-btn v66-cancel-action" data-confirm>${next==="cancelled"?"Confirmer l’annulation":"Confirmer la demande d’annulation"}</button></div><div class="v66-message"></div></div>`);document.body.appendChild(modal);
+            modal.querySelector("[data-close]").onclick=()=>modal.remove();
+            modal.querySelector("[data-confirm]").onclick=async()=>{const confirmButton=modal.querySelector("[data-confirm]"),msg=modal.querySelector(".v66-message");confirmButton.disabled=true;setMessage(msg,"Enregistrement…");try {
               const { error } = await db
                 .from("leave_requests")
                 .update({
-                  status: b.dataset.leaveCancel,
+                  status: next,
                   updated_at: new Date().toISOString(),
                 })
-                .eq("id", b.closest("[data-id]").dataset.id);
+                .eq("id", id);
               if (error) throw error;
+              modal.remove();
               toast("Demande mise à jour.");
               await renderLeaves(root, monthOffset);
             } catch (e) {
-              fail(e);
-            }
+              setMessage(msg,e.message,"error");confirmButton.disabled=false;
+            }};
           }),
       );
       }
@@ -1076,7 +1099,8 @@ async function boot(db) {
                 )),
           );
       };
-      paint("");
+      const intended=routeIntent?.projectId?(projects||[]).find(p=>p.id===routeIntent.projectId):null;
+      const initial=intended?`${intended.code}`:"";routeIntent=null;root.querySelector("#v66StatsSearch").value=initial;paint(initial);
       root.querySelector("#v66ProjectSearch").oninput = (e) =>
         paint(e.target.value);
     } catch (e) {
@@ -1116,6 +1140,7 @@ async function boot(db) {
     const year = d.getUTCFullYear(), first = new Date(Date.UTC(year, 0, 1));
     return { year, week: Math.ceil((((d - first) / 86400000) + 1) / 7) };
   }
+  function isoWeekFromDate(value){const d=new Date(Date.UTC(value.getUTCFullYear(),value.getUTCMonth(),value.getUTCDate()));d.setUTCDate(d.getUTCDate()+4-(d.getUTCDay()||7));const year=d.getUTCFullYear(),first=new Date(Date.UTC(year,0,1));return{year,week:Math.ceil((((d-first)/86400000)+1)/7)}}
 
   async function renderSheetExplorer(root, canReview) {
     const role = visibleRole();
@@ -1134,6 +1159,8 @@ async function boot(db) {
       });
       const now = currentIsoWeek(), nowKey = `${now.year}-${now.week}`;
       if (!weeks.has(nowKey)) weeks.set(nowKey, { ...now, sheets: [] });
+      const intent=routeIntent?.year&&routeIntent?.week?routeIntent:null;
+      if(intent){const intentKey=`${intent.year}-${intent.week}`;if(!weeks.has(intentKey))weeks.set(intentKey,{year:intent.year,week:intent.week,sheets:[]})}
       const ordered = [...weeks.values()].sort((a,b) => b.year-a.year || b.week-a.week);
       const byYear = new Map();
       ordered.forEach((w) => {
@@ -1148,6 +1175,7 @@ async function boot(db) {
         const weekNode = button.closest(".v66-week"), body = weekNode.querySelector(".v66-week-body");
         if (weekNode.classList.toggle("open")) await loadWeekRoster(weekNode, body, canReview, role);
       });
+      if(intent){const node=tree.querySelector(`[data-year="${intent.year}"][data-week="${intent.week}"]`);if(node){const monthFolder=node.closest("details.month"),yearFolder=monthFolder?.parentElement;monthFolder?.setAttribute("open","");yearFolder?.setAttribute?.("open","");const filter=root.querySelector("#v66SheetFilter");if(filter&&intent.filter)filter.value=intent.filter;node.classList.add("open");await loadWeekRoster(node,node.querySelector(".v66-week-body"),canReview,role);node.scrollIntoView({behavior:"smooth",block:"center"})}routeIntent=null}
     } catch (e) { root.querySelector("#v66SheetTree").innerHTML = `<div class="v66-card v66-empty">${esc(e.message)}</div>`; }
   }
 
@@ -1182,7 +1210,9 @@ async function boot(db) {
     } catch(e){body.innerHTML=`<div class="v66-card v66-empty">${esc(e.message)}</div>`}
   }
   function rootQuery(selector){return shell.querySelector(selector)}
-  function normalizeSearch(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()}
+  function normalizeSearch(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9@.+-]+/g," ").trim()}
+  function editDistanceAtMostOne(a,b){if(Math.abs(a.length-b.length)>1)return false;let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue}if(++d>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++}}return d+(i<a.length||j<b.length?1:0)<=1}
+  function smartSearchMatch(value,query){const q=normalizeSearch(query);if(!q)return true;const words=normalizeSearch(value).split(" ").filter(Boolean);return q.split(" ").filter(Boolean).every(token=>words.some(word=>word.includes(token)||token.includes(word)||(token.length>=5&&editDistanceAtMostOne(word,token))))}
 
   async function openTimesheetDetail(id, canReview) {
     const modal=el("div",{class:"v66-modal"},'<div class="v66-card"><div class="v66-empty">Chargement de la fiche…</div></div>');document.body.appendChild(modal);
@@ -1505,16 +1535,21 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>La saisie, l’enregistrement et le partage restent dans cette application.</p></div><button class="v66-btn primary" id="v66ToggleEditor">Nouvelle fiche</button></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-editor-wrap v66-hidden" id="v66EditorWrap"><iframe class="v66-editor-frame" title="Saisie de la fiche d’heures" loading="lazy" data-src="index.html?embedded=1"></iframe></div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
-    root.querySelector("#v66ToggleEditor").onclick=()=>{const wrap=root.querySelector("#v66EditorWrap"),frame=wrap.querySelector("iframe"),open=wrap.classList.toggle("v66-hidden");if(!open&&!frame.src)frame.src=frame.dataset.src;root.querySelector("#v66ToggleEditor").textContent=open?"Nouvelle fiche":"Masquer la saisie"};
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>Complète ta semaine actuelle ou retrouve une ancienne fiche.</p></div><div class="v66-actions"><button class="v66-btn" id="v66OtherWeek">Autre semaine</button><button class="v66-btn primary" id="v66CurrentSheet">Chargement…</button></div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-editor-wrap v66-hidden" id="v66EditorWrap"><iframe class="v66-editor-frame" title="Saisie de la fiche d’heures" loading="lazy" data-src="index.html?embedded=1"></iframe></div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
     try {
       if (navigator.onLine) await syncLegacySheets();
-      await loadMySheets(root);
+      const sheets=await loadMySheets(root),now=currentIsoWeek(),intent=routeIntent?.year?routeIntent:null,target=intent||now,current=sheets.find(s=>Number(s.iso_year)===Number(target.year)&&Number(s.iso_week)===Number(target.week));
+      const editable=!current||["draft","rejected","changed_after_validation"].includes(current.status),button=root.querySelector("#v66CurrentSheet");button.textContent=!current?"Nouvelle fiche":editable?"Compléter ma fiche":"Voir ma fiche";
+      const openTarget=()=>{if(current&&!editable)return openTimesheetDetail(current.id,false);openLegacyEditor(root,target.year,target.week)};button.onclick=openTarget;
+      root.querySelector("#v66OtherWeek").onclick=()=>chooseLegacyWeek(root,sheets);
+      if(intent?.open){routeIntent=null;openTarget()}
     } catch (e) {
       root.querySelector("#v66MySheets").innerHTML =
         `<div class="v66-card v66-empty">${esc(e.message)}</div>`;
     }
   }
+  function openLegacyEditor(root,year,week){localStorage.setItem("antras_selected_year_v1",String(year));const wrap=root.querySelector("#v66EditorWrap"),frame=wrap.querySelector("iframe");wrap.classList.remove("v66-hidden");frame.src=`index.html?embedded=1&year=${year}&week=${week}&t=${Date.now()}#w${week}`;wrap.scrollIntoView({behavior:"smooth",block:"start"})}
+  function chooseLegacyWeek(root,sheets){const now=currentIsoWeek(),modal=el("div",{class:"v66-modal"},`<form class="v66-card v66-form"><h2>Choisir une semaine</h2><div class="v66-grid"><label class="v66-field">Année<input name="year" type="number" min="2020" max="2100" value="${now.year}" required></label><label class="v66-field">Semaine<input name="week" type="number" min="1" max="53" value="${now.week}" required></label></div><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Ouvrir</button></div></form>`);document.body.appendChild(modal);modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.querySelector("form").onsubmit=e=>{e.preventDefault();const fd=new FormData(e.currentTarget),year=Number(fd.get("year")),week=Number(fd.get("week")),existing=sheets.find(s=>Number(s.iso_year)===year&&Number(s.iso_week)===week);modal.remove();if(existing&&!["draft","rejected","changed_after_validation"].includes(existing.status))openTimesheetDetail(existing.id,false);else openLegacyEditor(root,year,week)}}
 
   function localSheets() {
     try {
@@ -1564,7 +1599,7 @@ async function boot(db) {
       data.filter(s=>normalizeSearch(`${s.iso_year} ${monthLabels[isoWeekBounds(s.iso_year,s.iso_week).monday.getUTCMonth()]} semaine ${s.iso_week} ${sheetLabels[s.status]||s.status}`).includes(q)).forEach(s=>{const month=isoWeekBounds(s.iso_year,s.iso_week).monday.getUTCMonth();if(!grouped.has(s.iso_year))grouped.set(s.iso_year,new Map());if(!grouped.get(s.iso_year).has(month))grouped.get(s.iso_year).set(month,[]);grouped.get(s.iso_year).get(month).push(s)});
       box.innerHTML=grouped.size?[...grouped].map(([year,months],yi)=>`<details class="v66-folder" ${yi===0?"open":""}><summary>${year}</summary>${[...months].map(([month,sheets],mi)=>`<details class="v66-folder month" ${yi===0&&mi===0?"open":""}><summary>${monthLabels[month]}</summary>${sheets.map(s=>`<button type="button" class="v66-employee" data-sheet-id="${s.id}"><span><strong>${weekTitle(s.iso_year,s.iso_week)}</strong><small>Version ${s.version}${s.rejection_reason?` · Motif : ${esc(s.rejection_reason)}`:""}</small></span><span class="v66-pill ${esc(s.status)}">${esc(sheetLabels[s.status]||s.status)}</span></button>`).join("")}</details>`).join("")}</details>`).join(""):'<div class="v66-card v66-empty">Aucune fiche trouvée.</div>';
       box.querySelectorAll("[data-sheet-id]").forEach(b=>b.onclick=()=>openTimesheetDetail(b.dataset.sheetId,false));
-    };paint();if(search)search.oninput=e=>paint(e.target.value);
+    };paint();if(search)search.oninput=e=>paint(e.target.value);return data;
   }
 
   db.auth.onAuthStateChange(async (_event, nextSession) => {

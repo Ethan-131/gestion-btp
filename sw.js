@@ -1,7 +1,8 @@
-const CACHE='antras-v66-4';
+const CACHE='antras-v67-1';
 const ASSETS=[
   './',
   './index.html',
+  './v66.html',
   './manifest.webmanifest',
   './antras-logo.png',
   './icon-192.png',

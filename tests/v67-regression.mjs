@@ -25,7 +25,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v70-1/.test(sw),
+  "cache PWA versionné":/antras-v71-1/.test(sw),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
   "annulation harmonisée":/v66-cancel-action/.test(app)&&/Confirmer la demande d’annulation/.test(app),
@@ -40,6 +40,7 @@ const checks={
   "aucune validation fiche UI":!/data-review=/.test(app)&&!/\["review", "Validations"\]/.test(app),
   "alertes fiche":/timesheetWarnings/.test(app)&&/Fiche à vérifier/.test(app),
   "édition fiche RH":/data-save-sheet/.test(app)&&/Modifications RH enregistrées/.test(app),
+  "rendu officiel partagé":/officialTimesheetMarkup/.test(app)&&/RAPPORT HEBDOMADAIRE - ANTRAS OSSATURE BOIS/.test(app)&&/v66-official-paper/.test(app),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

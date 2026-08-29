@@ -63,7 +63,7 @@ async function boot(db) {
   if(localStorage.getItem(globalTimesheetPurge)!=="done"){
     localStorage.removeItem("antras_saved_history_v2");
     localStorage.removeItem("antras_sync_state_v3");
-    Object.keys(localStorage).filter(key=>key.startsWith("antras_draft_v1_")).forEach(key=>localStorage.removeItem(key));
+    Object.keys(localStorage).filter(key=>key.startsWith("antras_draft_v1_")||key.startsWith("antras_native_timesheet_")).forEach(key=>localStorage.removeItem(key));
     localStorage.setItem(globalTimesheetPurge,"done");
   }
   let session = null,
@@ -108,8 +108,10 @@ async function boot(db) {
 
   window.addEventListener("online", () => {
     renderOffline();
-    if (session && profile?.status === "active")
+    if (session && profile?.status === "active"){
       syncLegacySheets().catch(() => {});
+      syncNativeDrafts().catch(() => {});
+    }
   });
   window.addEventListener("offline", () => renderOffline());
   window.addEventListener("popstate",()=>{const next=(history.state&&history.state.page)||location.hash.slice(1)||"home";if(next!==currentPage){pageScrolls.set(currentPage,shell.scrollTop);currentPage=next;if(session&&profile?.status==="active")appScreen()}});
@@ -1559,10 +1561,10 @@ async function boot(db) {
   async function renderLegacy(root) {
     const role=visibleRole(),canSeeEmployees=["conducteur","rh","admin"].includes(role),now=currentIsoWeek();
     localStorage.setItem("antras_selected_year_v1",String(now.year));
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète directement ta fiche de la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-editor-wrap"><iframe class="v66-editor-frame" title="Fiche d’heures de la semaine actuelle" src="index.html?embedded=1&year=${now.year}&week=${now.week}&t=${Date.now()}#w${now.week}"></iframe></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète directement ta fiche de la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-native-editor"><div class="v66-card v66-empty">Chargement de la fiche actuelle…</div></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
     try {
-      if (navigator.onLine) await syncLegacySheets();
-      await loadMySheets(root);const intent=routeIntent;
+      if (navigator.onLine) { await syncLegacySheets(); await syncNativeDrafts(); }
+      await Promise.all([renderNativeCurrentTimesheet(root.querySelector("#v66CurrentSheetPanel"),now.year,now.week),loadMySheets(root)]);const intent=routeIntent;
       const hidePanels=()=>{root.querySelector("#v66CurrentSheetPanel").hidden=true;root.querySelector("#v66SavedSheetsPanel").hidden=true;const employee=root.querySelector("#v66EmployeeSheetsPanel");if(employee)employee.hidden=true};
       root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"});else root.querySelector("#v66CurrentSheetPanel").hidden=false};
       const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;const opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening){await renderSheetExplorer(panel,role==="rh");panel.scrollIntoView({behavior:"smooth",block:"start"})}else root.querySelector("#v66CurrentSheetPanel").hidden=false};
@@ -1573,12 +1575,55 @@ async function boot(db) {
         `<div class="v66-card v66-empty">${esc(e.message)}</div>`;
     }
   }
+
+  const nativeDraftKey=(year,week)=>`antras_native_timesheet_${profile.id}_${year}_${week}`;
+  async function syncNativeDrafts(){
+    if(!navigator.onLine||!session||!profile)return 0;
+    let sent=0;
+    for(const key of Object.keys(localStorage).filter(k=>k.startsWith(`antras_native_timesheet_${profile.id}_`))){
+      let payload;try{payload=JSON.parse(localStorage.getItem(key)||"")}catch{continue}
+      const{error}=await db.rpc("save_and_submit_timesheet",{payload});
+      if(error)throw error;
+      localStorage.removeItem(key);sent++;
+    }
+    return sent;
+  }
+
+  async function renderNativeCurrentTimesheet(panel,year,week){
+    if(!panel)return;
+    const monday=isoWeekBounds(year,week).monday,dates=Array.from({length:5},(_,i)=>{const d=new Date(monday);d.setUTCDate(d.getUTCDate()+i);return dateKey(d)});
+    const dayNames=["Lundi","Mardi","Mercredi","Jeudi","Vendredi"];
+    let projects=[],existing=null;
+    if(navigator.onLine){
+      const[projectResult,sheetResult]=await Promise.all([
+        db.from("projects").select("id,code,name,status,project_it_zones(establishment_id,it_zone_id,it_zones(label))").neq("status","archived").order("code"),
+        db.from("timesheets").select("id,observations,timesheet_days(id,work_date,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,vehicle,delivery_note,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours,position))").eq("employee_id",profile.id).eq("iso_year",year).eq("iso_week",week).maybeSingle()
+      ]);
+      if(projectResult.error)throw projectResult.error;if(sheetResult.error)throw sheetResult.error;
+      projects=projectResult.data||[];existing=sheetResult.data;
+    }
+    let local=null;try{local=JSON.parse(localStorage.getItem(nativeDraftKey(year,week))||"null")}catch{}
+    const existingDays=new Map((existing?.timesheet_days||[]).map(d=>[d.work_date,d]));
+    const localDays=new Map((local?.days||[]).map(d=>[d.work_date,d]));
+    const options=projects.map(p=>`<option value="${esc(`${p.code} — ${p.name}`)}"></option>`).join("");
+    const siteMarkup=(site={})=>`<div class="v66-native-site"><label>Chantier / code<input class="v66-native-project" list="v66ProjectOptions" value="${esc(site.display||[site.project_code_snapshot||site.code,site.project_name_snapshot||site.name].filter(Boolean).join(" — "))}" placeholder="Code ou nom du chantier"></label><label>Heures<input class="v66-native-hours" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="${esc(site.hours??"")}"></label><button type="button" class="v66-native-remove" aria-label="Supprimer ce chantier">×</button></div>`;
+    const daysMarkup=dates.map((date,index)=>{const source=localDays.get(date)||existingDays.get(date)||{},sites=source.sites||(source.timesheet_sites||[]);return `<section class="v66-native-day" data-date="${date}"><header><strong>${dayNames[index]}</strong><span>${fmtDate(date)}</span></header><div class="v66-native-sites">${(sites.length?sites:[{}]).map(siteMarkup).join("")}</div><button type="button" class="v66-link-btn v66-native-add">+ Ajouter un chantier</button><div class="v66-native-day-details"><label>Repas<select class="v66-native-meal"><option value="0">0</option><option value="1" ${Number(source.meal)===1?"selected":""}>1</option></select></label><label>IT<input class="v66-native-it" value="${esc(source.it_zone_label_snapshot||source.it_zone_label||"")}" readonly placeholder="Calcul automatique"></label><label>Tâches effectuées<input class="v66-native-task" value="${esc(source.manual_task||(source.tasks||[]).join(", ")||"")}" placeholder="Travaux réalisés"></label></div><p class="v66-native-warning" hidden></p></section>`}).join("");
+    panel.innerHTML=`<form class="v66-native-sheet"><div class="v66-native-report"><img src="antras-logo.png" alt=""><div><strong>RAPPORT HEBDOMADAIRE</strong><small>${esc(weekTitle(year,week))}</small></div></div><div class="v66-native-identity"><span>Nom : <strong>${esc(profile.last_name||"")}</strong></span><span>Prénom : <strong>${esc(profile.first_name||"")}</strong></span></div><datalist id="v66ProjectOptions">${options}</datalist>${daysMarkup}<label class="v66-native-observations">Observations<textarea rows="3">${esc(local?.observations||existing?.observations||"")}</textarea></label><div class="v66-native-total">Total : <strong>0 h</strong></div><div class="v66-actions"><button class="v66-btn primary" type="submit">Enregistrer et partager la fiche</button></div><div class="v66-message"></div></form>`;
+    const form=panel.querySelector("form"),normalize=v=>String(v||"").trim().toLowerCase();
+    const projectFor=value=>{const q=normalize(value),parts=q.split("—").map(x=>x.trim());return projects.find(p=>normalize(`${p.code} — ${p.name}`)===q||normalize(p.code)===q||normalize(p.name)===q||(parts.length>1&&normalize(p.code)===parts[0]&&normalize(p.name)===parts.slice(1).join("—").trim()))};
+    const refresh=()=>{let total=0;form.querySelectorAll(".v66-native-day").forEach(day=>{const matches=[...day.querySelectorAll(".v66-native-project")].map(i=>projectFor(i.value)).filter(Boolean),unknown=[...day.querySelectorAll(".v66-native-project")].some(i=>i.value.trim()&&!projectFor(i.value));const zones=[...new Map(matches.flatMap(p=>(p.project_it_zones||[]).filter(z=>z.establishment_id===profile.establishment_id&&z.it_zones?.label).map(z=>[z.it_zone_id,z.it_zones.label]))).values()];const it=day.querySelector(".v66-native-it"),warning=day.querySelector(".v66-native-warning");it.value=zones.length===1?zones[0]:"";warning.hidden=!(unknown||zones.length!==1&&matches.length);warning.textContent=unknown?"Attention : chantier non référencé. Il sera utilisé sans être ajouté à la base.":zones.length>1?"Plusieurs zones IT : décision RH nécessaire.":"Zone IT non renseignée : 0 IT sera appliqué.";day.querySelectorAll(".v66-native-hours").forEach(i=>total+=Number(i.value||0))});form.querySelector(".v66-native-total strong").textContent=`${String(total).replace(".",",")} h`};
+    form.addEventListener("input",refresh);
+    form.addEventListener("click",e=>{if(e.target.closest(".v66-native-add")){const sites=e.target.closest(".v66-native-day").querySelector(".v66-native-sites");sites.insertAdjacentHTML("beforeend",siteMarkup());refresh()}if(e.target.closest(".v66-native-remove")){const row=e.target.closest(".v66-native-site"),box=row.parentElement;if(box.children.length>1)row.remove();else{row.querySelectorAll("input").forEach(i=>i.value="")}refresh()}});
+    form.onsubmit=async e=>{e.preventDefault();if(!confirm("Enregistrer la fiche d’heures et la partager avec le bureau ?"))return;const button=form.querySelector('[type="submit"]'),msg=form.querySelector(".v66-message");button.disabled=true;const payload={iso_year:year,iso_week:week,observations:form.querySelector("textarea").value.trim(),days:[...form.querySelectorAll(".v66-native-day")].map(day=>{const entries=[...day.querySelectorAll(".v66-native-site")].map((row,position)=>{const input=row.querySelector(".v66-native-project"),known=projectFor(input.value),raw=input.value.split("—").map(x=>x.trim());return{code:known?.code||raw[0]||"",name:known?.name||raw.slice(1).join(" — ")||raw[0]||"",hours:Number(row.querySelector(".v66-native-hours").value||0),position,project:known}}).filter(x=>x.code||x.name||x.hours);const zones=[...new Map(entries.flatMap(x=>(x.project?.project_it_zones||[]).filter(z=>z.establishment_id===profile.establishment_id).map(z=>[z.it_zone_id,z]))).values()],zone=zones.length===1?zones[0]:null;return{work_date:day.dataset.date,meal:Number(day.querySelector(".v66-native-meal").value),travel_km:0,it_zone_id:zone?.it_zone_id||null,it_zone_label_snapshot:zone?.it_zones?.label||null,it_needs_review:zones.length!==1&&entries.length>0,establishment_id_snapshot:profile.establishment_id||null,tasks:[],manual_task:day.querySelector(".v66-native-task").value.trim(),vehicle:"",delivery_note:"",sites:entries.map(({code,name,hours,position})=>({code,name,hours,position}))}})};try{if(!navigator.onLine){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche enregistrée sur l’appareil. Elle sera envoyée automatiquement dès que la connexion sera rétablie.","ok")}else{const{error}=await db.rpc("save_and_submit_timesheet",{payload});if(error)throw error;localStorage.removeItem(nativeDraftKey(year,week));setMessage(msg,"Fiche enregistrée et partagée avec le bureau.","ok");toast("Fiche enregistrée et partagée.");const pageRoot=panel.closest("#v66Content");if(pageRoot)await loadMySheets(pageRoot)}}catch(err){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche conservée sur l’appareil. L’envoi sera retenté automatiquement.","error");console.error(err)}finally{button.disabled=false}};
+    refresh();
+  }
   function openLegacyEditor(_root,year,week){
     document.querySelector(".v66-timesheet-modal")?.remove();
     localStorage.setItem("antras_selected_year_v1",String(year));
-    const modal=el("div",{class:"v66-timesheet-modal"},`<header><div><strong>Ma fiche d’heures</strong><small>${esc(weekTitle(year,week))}</small></div><button type="button" class="v66-btn" data-close>Fermer</button></header><iframe class="v66-timesheet-frame" title="Saisie de la fiche d’heures" src="index.html?embedded=1&year=${year}&week=${week}&t=${Date.now()}#w${week}"></iframe>`);
+    const modal=el("div",{class:"v66-timesheet-modal"},`<header><div><strong>Ma fiche d’heures</strong><small>${esc(weekTitle(year,week))}</small></div><button type="button" class="v66-btn" data-close>Fermer</button></header><main class="v66-native-editor"><div class="v66-card v66-empty">Chargement…</div></main>`);
     document.body.appendChild(modal);
     modal.querySelector("[data-close]").onclick=()=>modal.remove();
+    renderNativeCurrentTimesheet(modal.querySelector(".v66-native-editor"),year,week).catch(e=>{fail(e);modal.remove()});
   }
   function chooseLegacyWeek(root,sheets){const now=currentIsoWeek(),modal=el("div",{class:"v66-modal"},`<form class="v66-card v66-form"><h2>Choisir une semaine</h2><div class="v66-grid"><label class="v66-field">Année<input name="year" type="number" min="2020" max="2100" value="${now.year}" required></label><label class="v66-field">Semaine<input name="week" type="number" min="1" max="53" value="${now.week}" required></label></div><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Ouvrir</button></div></form>`);document.body.appendChild(modal);modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.querySelector("form").onsubmit=e=>{e.preventDefault();const fd=new FormData(e.currentTarget),year=Number(fd.get("year")),week=Number(fd.get("week")),existing=sheets.find(s=>Number(s.iso_year)===year&&Number(s.iso_week)===week);modal.remove();if(existing&&!["draft","rejected","changed_after_validation"].includes(existing.status))openTimesheetDetail(existing.id,false);else openLegacyEditor(root,year,week)}}
 

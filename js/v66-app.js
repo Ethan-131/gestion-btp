@@ -1162,7 +1162,7 @@ async function boot(db) {
 
   async function renderSheetExplorer(root, canReview) {
     const role = visibleRole();
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches des salariés" : "Fiches équipes"}</h1><p>Année → mois → semaine → salariés. Les fiches transmises ne demandent aucune validation.</p></div></div><div class="v66-filterbar ${canReview?"v66-search-only":""}"><input class="v66-search" id="v66SheetSearch" placeholder="Rechercher un salarié…"><select id="v66SheetFilter" class="${canReview?"v66-hidden":""}"><option value="received" selected>Reçues</option><option value="missing">Manquantes</option>${canReview?"":'<option value="all">Toutes</option><option value="warning">À vérifier</option><option value="absent">Absents / dispensés</option>'}</select></div><div id="v66SheetTree" class="v66-tree"><div class="v66-card v66-empty">Chargement de l’index léger…</div></div>`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches des salariés" : "Fiches équipes"}</h1><p>Année → mois → semaine → salariés. Les fiches transmises ne demandent aucune validation.</p></div></div><div class="v66-filterbar v66-search-only"><input class="v66-search" id="v66SheetSearch" placeholder="Rechercher un salarié…"><input type="hidden" id="v66SheetFilter" value="received"></div><div id="v66SheetTree" class="v66-tree"><div class="v66-card v66-empty">Chargement de l’index léger…</div></div>`;
     try {
       let query = db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,submitted_at,reviewed_at,profiles!timesheets_employee_id_fkey(first_name,last_name,email)")
         .order("iso_year", { ascending: false }).order("iso_week", { ascending: false }).limit(500);
@@ -1557,17 +1557,17 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    const role=visibleRole(),canSeeEmployees=["conducteur","rh","admin"].includes(role);
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète ta fiche, consulte tes archives ou les fiches auxquelles ton rôle donne accès.</p></div></div><div class="v66-timesheet-choices"><button class="v66-choice-card primary" id="v66CurrentSheet"><strong>Compléter ma fiche</strong><small>Ouvrir directement la semaine actuelle</small></button><button class="v66-choice-card" id="v66SavedSheets"><strong>Mes fiches enregistrées</strong><small>Mes fiches personnelles classées par année, mois et semaine</small></button>${canSeeEmployees?'<button class="v66-choice-card" id="v66EmployeeSheets"><strong>Fiches d’heures salariés</strong><small>Consulter les fiches accessibles, classées par année, mois et semaine</small></button>':''}</div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
+    const role=visibleRole(),canSeeEmployees=["conducteur","rh","admin"].includes(role),now=currentIsoWeek();
+    localStorage.setItem("antras_selected_year_v1",String(now.year));
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète directement ta fiche de la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-editor-wrap"><iframe class="v66-editor-frame" title="Fiche d’heures de la semaine actuelle" src="index.html?embedded=1&year=${now.year}&week=${now.week}&t=${Date.now()}#w${now.week}"></iframe></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
     try {
       if (navigator.onLine) await syncLegacySheets();
-      await loadMySheets(root);const now=currentIsoWeek(),intent=routeIntent;
-      const hidePanels=()=>{root.querySelector("#v66SavedSheetsPanel").hidden=true;const employee=root.querySelector("#v66EmployeeSheetsPanel");if(employee)employee.hidden=true};
-      const openTarget=()=>openLegacyEditor(root,now.year,now.week);root.querySelector("#v66CurrentSheet").onclick=openTarget;
-      root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"})};
-      const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;hidePanels();panel.hidden=false;await renderSheetExplorer(panel,role==="rh");panel.scrollIntoView({behavior:"smooth",block:"start"})};
+      await loadMySheets(root);const intent=routeIntent;
+      const hidePanels=()=>{root.querySelector("#v66CurrentSheetPanel").hidden=true;root.querySelector("#v66SavedSheetsPanel").hidden=true;const employee=root.querySelector("#v66EmployeeSheetsPanel");if(employee)employee.hidden=true};
+      root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"});else root.querySelector("#v66CurrentSheetPanel").hidden=false};
+      const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;const opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening){await renderSheetExplorer(panel,role==="rh");panel.scrollIntoView({behavior:"smooth",block:"start"})}else root.querySelector("#v66CurrentSheetPanel").hidden=false};
       root.querySelector("#v66EmployeeSheets")?.addEventListener("click",showEmployees);
-      if(intent?.employeeSheets)await showEmployees();else{routeIntent=null;if(intent?.open)openTarget()}
+      if(intent?.employeeSheets)await showEmployees();else routeIntent=null;
     } catch (e) {
       root.querySelector("#v66MySheets").innerHTML =
         `<div class="v66-card v66-empty">${esc(e.message)}</div>`;

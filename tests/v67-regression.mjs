@@ -25,11 +25,11 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v75-1/.test(sw),
+  "cache PWA versionné":/antras-v76-1/.test(sw),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
   "annulation harmonisée":/v66-cancel-action/.test(app)&&/Confirmer la demande d’annulation/.test(app),
-  "actions fiche simplifiées":/Compléter ma fiche/.test(app)&&/Mes fiches enregistrées/.test(app)&&!/id="v66OtherWeek"/.test(app),
+  "actions fiche simplifiées":/Complète directement ta fiche/.test(app)&&/Mes fiches enregistrées/.test(app)&&!/id="v66OtherWeek"/.test(app),
   "paramètres personnels":/update_own_profile/.test(app)&&/Changer mon mot de passe/.test(app),
   "profil protégé côté serveur":/security definer/.test(settingsSql)&&/where id=auth\.uid\(\)/.test(settingsSql),
   "mot de passe oublié":/resetPasswordForEmail/.test(app)&&/PASSWORD_RECOVERY/.test(app),
@@ -45,6 +45,8 @@ const checks={
   "entrée fiches unique":/Fiches d’heures salariés/.test(app)&&/Mes fiches enregistrées/.test(app)&&!/pages\.push\(\["team"/.test(app),
   "compteurs semaine cliquables":/data-week-filter="received"/.test(app)&&/data-week-filter="missing"/.test(app)&&/data-missing-count/.test(app),
   "semaine RH épurée":/Fiches reçues/.test(app)&&/Fiches manquantes/.test(app)&&/body\.innerHTML='<div class="v66-employee-list"><\/div>'/.test(app),
+  "fiche actuelle intégrée":/id="v66CurrentSheetPanel"/.test(app)&&/Fiche d’heures de la semaine actuelle/.test(app)&&/v66-editor-frame/.test(app),
+  "ancien filtre retiré":!/id="v66SheetFilter"[^>]*<option/.test(app)&&/type="hidden" id="v66SheetFilter"/.test(app),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

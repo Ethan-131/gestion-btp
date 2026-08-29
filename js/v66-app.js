@@ -151,7 +151,7 @@ async function boot(db) {
   }
 
   function authScreen(mode = "login") {
-    shell.innerHTML = `<main class="v66-auth v66-card"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span></div><h1>${mode === "login" ? "Connexion" : "Demande de compte"}</h1><p>${mode === "login" ? "Connecte-toi avec ton adresse professionnelle." : "Une RH devra confirmer ton compte et lui attribuer un rôle avant tout accès."}</p><div class="v66-tabs"><button data-mode="login" class="${mode === "login" ? "active" : ""}">Se connecter</button><button data-mode="register" class="${mode === "register" ? "active" : ""}">Créer un compte</button></div><form class="v66-form" id="v66AuthForm">${mode === "register" ? '<div class="v66-grid"><label class="v66-field">Prénom<input name="first_name" required autocomplete="given-name"></label><label class="v66-field">Nom<input name="last_name" required autocomplete="family-name"></label></div><label class="v66-field">Matricule (facultatif)<input name="employee_number"></label>' : ""}<label class="v66-field">E-mail<input name="email" type="email" required autocomplete="email"></label><label class="v66-field">Mot de passe<input name="password" type="password" minlength="8" required autocomplete="${mode === "login" ? "current-password" : "new-password"}"></label><button class="v66-btn primary" type="submit">${mode === "login" ? "Se connecter" : "Envoyer la demande"}</button></form><div id="v66AuthMessage" class="v66-message"></div></main>`;
+    shell.innerHTML = `<main class="v66-auth v66-card"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span></div><h1>${mode === "login" ? "Connexion" : "Demande de compte"}</h1><p>${mode === "login" ? "Connecte-toi avec ton adresse professionnelle." : "Une RH devra confirmer ton compte et lui attribuer un rôle avant tout accès."}</p><div class="v66-tabs"><button data-mode="login" class="${mode === "login" ? "active" : ""}">Se connecter</button><button data-mode="register" class="${mode === "register" ? "active" : ""}">Créer un compte</button></div><form class="v66-form" id="v66AuthForm">${mode === "register" ? '<div class="v66-grid"><label class="v66-field">Prénom<input name="first_name" required autocomplete="given-name"></label><label class="v66-field">Nom<input name="last_name" required autocomplete="family-name"></label></div><label class="v66-field">Matricule (facultatif)<input name="employee_number"></label>' : ""}<label class="v66-field">E-mail<input name="email" type="email" required autocomplete="email"></label><label class="v66-field">Mot de passe<input name="password" type="password" minlength="8" required autocomplete="${mode === "login" ? "current-password" : "new-password"}"></label><button class="v66-btn primary" type="submit">${mode === "login" ? "Se connecter" : "Envoyer la demande"}</button>${mode === "login" ? '<button class="v66-link-btn" type="button" id="v66ForgotPassword">Mot de passe oublié ?</button>' : ""}</form><div id="v66AuthMessage" class="v66-message"></div></main>`;
     shell
       .querySelectorAll("[data-mode]")
       .forEach((b) => (b.onclick = () => authScreen(b.dataset.mode)));
@@ -200,6 +200,11 @@ async function boot(db) {
         button.disabled = false;
       }
     };
+    shell.querySelector("#v66ForgotPassword")?.addEventListener("click",async()=>{
+      const email=shell.querySelector('input[name="email"]')?.value.trim(),msg=shell.querySelector("#v66AuthMessage");
+      if(!email)return setMessage(msg,"Renseigne d’abord ton adresse e-mail.","error");
+      try{setMessage(msg,"Envoi du lien…");const{error}=await db.auth.resetPasswordForEmail(email,{redirectTo:new URL("v66.html#settings",location.href).href});if(error)throw error;setMessage(msg,"Un lien sécurisé vient d’être envoyé par e-mail.","ok")}catch(e){setMessage(msg,e.message,"error")}
+    });
   }
 
   function pendingScreen() {
@@ -238,6 +243,7 @@ async function boot(db) {
       pages.push(["it-settings", "Paramètres IT"]);
     pages.push(["leaves", "Congés & RTT"]);
     pages.push(["legacy", "Fiches d’heures"]);
+    pages.push(["settings", "Paramètres"]);
     return pages;
   }
 
@@ -279,6 +285,7 @@ async function boot(db) {
     if (currentPage === "it-settings") renderItSettings(content);
     if (currentPage === "leaves") renderLeaves(content);
     if (currentPage === "legacy") renderLegacy(content);
+    if (currentPage === "settings") renderSettings(content);
     requestAnimationFrame(()=>{shell.scrollTop=pageScrolls.get(currentPage)||0});
   }
 
@@ -1535,7 +1542,7 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>Complète ta semaine actuelle ou retrouve une ancienne fiche.</p></div><div class="v66-actions"><button class="v66-btn" id="v66OtherWeek">Autre semaine</button><button class="v66-btn primary" id="v66CurrentSheet">Chargement…</button></div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-editor-wrap v66-hidden" id="v66EditorWrap"><iframe class="v66-editor-frame" title="Saisie de la fiche d’heures" loading="lazy" data-src="index.html?embedded=1"></iframe></div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>Complète ta semaine actuelle ou retrouve une ancienne fiche.</p></div><div class="v66-actions"><button class="v66-btn" id="v66OtherWeek">Autre semaine</button><button class="v66-btn primary" id="v66CurrentSheet">Chargement…</button></div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
     try {
       if (navigator.onLine) await syncLegacySheets();
       const sheets=await loadMySheets(root),now=currentIsoWeek(),intent=routeIntent?.year?routeIntent:null,target=intent||now,current=sheets.find(s=>Number(s.iso_year)===Number(target.year)&&Number(s.iso_week)===Number(target.week));
@@ -1548,8 +1555,22 @@ async function boot(db) {
         `<div class="v66-card v66-empty">${esc(e.message)}</div>`;
     }
   }
-  function openLegacyEditor(root,year,week){localStorage.setItem("antras_selected_year_v1",String(year));const wrap=root.querySelector("#v66EditorWrap"),frame=wrap.querySelector("iframe");wrap.classList.remove("v66-hidden");frame.src=`index.html?embedded=1&year=${year}&week=${week}&t=${Date.now()}#w${week}`;wrap.scrollIntoView({behavior:"smooth",block:"start"})}
+  function openLegacyEditor(_root,year,week){
+    document.querySelector(".v66-timesheet-modal")?.remove();
+    localStorage.setItem("antras_selected_year_v1",String(year));
+    const modal=el("div",{class:"v66-timesheet-modal"},`<header><div><strong>Ma fiche d’heures</strong><small>${esc(weekTitle(year,week))}</small></div><button type="button" class="v66-btn" data-close>Fermer</button></header><iframe class="v66-timesheet-frame" title="Saisie de la fiche d’heures" src="index.html?embedded=1&year=${year}&week=${week}&t=${Date.now()}#w${week}"></iframe>`);
+    document.body.appendChild(modal);
+    modal.querySelector("[data-close]").onclick=()=>modal.remove();
+  }
   function chooseLegacyWeek(root,sheets){const now=currentIsoWeek(),modal=el("div",{class:"v66-modal"},`<form class="v66-card v66-form"><h2>Choisir une semaine</h2><div class="v66-grid"><label class="v66-field">Année<input name="year" type="number" min="2020" max="2100" value="${now.year}" required></label><label class="v66-field">Semaine<input name="week" type="number" min="1" max="53" value="${now.week}" required></label></div><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Ouvrir</button></div></form>`);document.body.appendChild(modal);modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.querySelector("form").onsubmit=e=>{e.preventDefault();const fd=new FormData(e.currentTarget),year=Number(fd.get("year")),week=Number(fd.get("week")),existing=sheets.find(s=>Number(s.iso_year)===year&&Number(s.iso_week)===week);modal.remove();if(existing&&!["draft","rejected","changed_after_validation"].includes(existing.status))openTimesheetDetail(existing.id,false);else openLegacyEditor(root,year,week)}}
+
+  async function renderSettings(root){
+    let establishmentName="Non attribué";
+    if(profile.establishment_id){const{data}=await db.from("establishments").select("name").eq("id",profile.establishment_id).maybeSingle();if(data?.name)establishmentName=data.name}
+    root.innerHTML=`<div class="v66-pagehead"><div><h1>Paramètres</h1><p>Informations personnelles et sécurité de ton compte.</p></div></div><div class="v66-settings-grid"><form class="v66-card v66-form" id="v66PersonalForm"><h2>Mes informations</h2><div class="v66-grid"><label class="v66-field">Prénom<input name="first_name" required maxlength="80" value="${esc(profile.first_name||"")}"></label><label class="v66-field">Nom<input name="last_name" required maxlength="80" value="${esc(profile.last_name||"")}"></label></div><label class="v66-field">Adresse e-mail<input value="${esc(profile.email||session?.user?.email||"")}" readonly></label><div class="v66-account-readonly"><span><small>Matricule</small><strong>${esc(profile.employee_number||"Non renseigné")}</strong></span><span><small>Rôle</small><strong>${esc(roleLabels[profile.role]||profile.role)}</strong></span><span><small>Siège</small><strong>${esc(establishmentName)}</strong></span><span><small>Statut</small><strong>${esc(statusLabels[profile.status]||profile.status)}</strong></span></div><p class="v66-help">Le matricule, le rôle, le siège et le statut sont gérés par les RH.</p><div class="v66-actions"><button class="v66-btn primary">Enregistrer mes informations</button></div><div class="v66-message"></div></form><form class="v66-card v66-form" id="v66PasswordForm"><h2>Changer mon mot de passe</h2><label class="v66-field">Nouveau mot de passe<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label class="v66-field">Confirmer le mot de passe<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label><p class="v66-help">Utilise au minimum 8 caractères. Ton mot de passe ne sera jamais affiché ni enregistré dans le code.</p><div class="v66-actions"><button class="v66-btn primary">Changer mon mot de passe</button></div><div class="v66-message"></div></form></div>`;
+    root.querySelector("#v66PersonalForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,msg=form.querySelector(".v66-message"),button=form.querySelector("button"),fd=new FormData(form);button.disabled=true;try{const{data,error}=await db.rpc("update_own_profile",{new_first_name:fd.get("first_name").trim(),new_last_name:fd.get("last_name").trim()});if(error)throw error;profile={...profile,...data};setMessage(msg,"Informations mises à jour.","ok");toast("Profil mis à jour.")}catch(err){setMessage(msg,err.message,"error")}finally{button.disabled=false}};
+    root.querySelector("#v66PasswordForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,msg=form.querySelector(".v66-message"),button=form.querySelector("button"),fd=new FormData(form),password=String(fd.get("password")||""),confirmation=String(fd.get("confirm_password")||"");if(password!==confirmation)return setMessage(msg,"Les deux mots de passe ne correspondent pas.","error");button.disabled=true;try{const{error}=await db.auth.updateUser({password});if(error)throw error;form.reset();setMessage(msg,"Mot de passe modifié avec succès.","ok");toast("Mot de passe modifié.")}catch(err){setMessage(msg,err.message,"error")}finally{button.disabled=false}};
+  }
 
   function localSheets() {
     try {
@@ -1604,6 +1625,7 @@ async function boot(db) {
 
   db.auth.onAuthStateChange(async (_event, nextSession) => {
     session = nextSession;
+    if(_event==="PASSWORD_RECOVERY")currentPage="settings";
     try {
       await loadProfile();
     } catch (e) {

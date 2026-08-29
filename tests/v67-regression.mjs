@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 const app=fs.readFileSync(new URL("../js/v66-app.js",import.meta.url),"utf8");
 const legacy=fs.readFileSync(new URL("../index.html",import.meta.url),"utf8");
 const sql=fs.readFileSync(new URL("../supabase/v67-spa-performance-corrected.sql",import.meta.url),"utf8");
+const settingsSql=fs.readFileSync(new URL("../supabase/v69-account-settings.sql",import.meta.url),"utf8");
 const sw=fs.readFileSync(new URL("../sw.js",import.meta.url),"utf8");
 
 const checks={
@@ -20,15 +21,19 @@ const checks={
   "chantier inconnu autorisé":/project_match := null/.test(sql)&&/Chantier non référencé/.test(app),
   "aucune création chantier automatique":!/insert into public\.projects/.test(sql),
   "SPA sans navigation legacy":!/location\.href = "index\.html"/.test(app),
-  "saisie lazy":/loading="lazy" data-src="index\.html\?embedded=1"/.test(app),
+  "saisie plein écran stable":/v66-timesheet-modal/.test(app)&&/v66-timesheet-frame/.test(app),
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v68-1/.test(sw),
+  "cache PWA versionné":/antras-v69-1/.test(sw),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
   "annulation harmonisée":/v66-cancel-action/.test(app)&&/Confirmer la demande d’annulation/.test(app),
   "action fiche contextuelle":/id="v66CurrentSheet"/.test(app)&&/Compléter ma fiche/.test(app)&&/#w\$\{week\}/.test(app),
+  "paramètres personnels":/update_own_profile/.test(app)&&/Changer mon mot de passe/.test(app),
+  "profil protégé côté serveur":/security definer/.test(settingsSql)&&/where id=auth\.uid\(\)/.test(settingsSql),
+  "mot de passe oublié":/resetPasswordForEmail/.test(app)&&/PASSWORD_RECOVERY/.test(app),
+  "semaine intégrée exacte":/requestedYear/.test(legacy)&&/requestedWeek/.test(legacy),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

@@ -8659,10 +8659,11 @@ document.getElementById('dashboardSalary')?.addEventListener('click',()=>{docume
   document.documentElement.classList.add('antras-embedded');
   const welcome=document.getElementById('welcomeScreen'),dashboard=document.getElementById('dashboardScreen');
   if(welcome)welcome.remove();if(dashboard)dashboard.classList.remove('open');
+  const params=new URLSearchParams(location.search),requestedYear=Number(params.get('year')),requestedWeek=Number(params.get('week'));
   const now=new Date(),d=new Date(Date.UTC(now.getFullYear(),now.getMonth(),now.getDate()));d.setUTCDate(d.getUTCDate()+4-(d.getUTCDay()||7));
-  const y=d.getUTCFullYear(),first=new Date(Date.UTC(y,0,1)),w=Math.ceil((((d-first)/86400000)+1)/7);
+  const currentYear=d.getUTCFullYear(),first=new Date(Date.UTC(currentYear,0,1)),currentWeek=Math.ceil((((d-first)/86400000)+1)/7),y=requestedYear>=2020&&requestedYear<=2100?requestedYear:currentYear,w=requestedWeek>=1&&requestedWeek<=53?requestedWeek:currentWeek;
   const picker=document.getElementById('yearPicker');if(picker&&picker.value!==String(y)){picker.value=String(y);picker.dispatchEvent(new Event('change',{bubbles:true}))}
-  if(!/^#w\d+$/.test(location.hash))location.hash=`#w${w}`;
+  if(location.hash!==`#w${w}`)location.hash=`#w${w}`;
 })();
 </script>
 <style>.antras-embedded #welcomeScreen,.antras-embedded #dashboardScreen,.antras-embedded .dashboardFab{display:none!important}.antras-embedded body{padding-top:0!important}</style>

@@ -70,7 +70,8 @@ async function boot(db) {
     profile = null,
     currentPage = "home",
     previewRole = null,
-    routeIntent = null;
+    routeIntent = null,
+    authReady = false;
   const pageScrolls=new Map();
   const shell = el("div", { class: "v66-shell" });
   if(/^#[a-z-]+$/.test(location.hash))currentPage=location.hash.slice(1);
@@ -1688,15 +1689,20 @@ async function boot(db) {
     };paint();if(search)search.oninput=e=>paint(e.target.value);return data;
   }
 
-  db.auth.onAuthStateChange(async (_event, nextSession) => {
-    session = nextSession;
-    if(_event==="PASSWORD_RECOVERY")currentPage="settings";
-    try {
-      await loadProfile();
-    } catch (e) {
-      console.error(e);
-    }
-    route();
+  db.auth.onAuthStateChange((_event, nextSession) => {
+    // getSession() réalise le premier affichage. Ignorer INITIAL_SESSION évite
+    // que deux rendus asynchrones reconstruisent la même page en concurrence.
+    if (!authReady || _event === "INITIAL_SESSION") return;
+    const previousUserId=session?.user?.id||null,nextUserId=nextSession?.user?.id||null;
+    session=nextSession;
+    // Le renouvellement automatique du jeton ne doit jamais fermer/recréer
+    // l'écran que l'utilisateur est en train de compléter.
+    if (_event === "TOKEN_REFRESHED" && previousUserId === nextUserId) return;
+    setTimeout(async()=>{
+      if(_event==="PASSWORD_RECOVERY")currentPage="settings";
+      try{await loadProfile()}catch(e){console.error(e)}
+      route();
+    },0);
   });
   const {
     data: { session: initial },
@@ -1709,5 +1715,6 @@ async function boot(db) {
       fail(e);
     }
   }
+  authReady = true;
   route();
 }

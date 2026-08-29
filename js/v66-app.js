@@ -232,24 +232,24 @@ async function boot(db) {
     const role = visibleRole();
     const pages = [["home", "Accueil"]];
     if (role === "rh") pages.push(["accounts", "Comptes"]);
-    if (role === "rh") pages.push(["review", "Validations"]);
+    if (role === "rh") pages.push(["team", "Fiches salariés"]);
     if (role === "conducteur") pages.push(["team", "Fiches équipes"]);
     if (role === "admin") pages.push(["team", "Toutes les fiches"]);
     if (["conducteur", "rh", "admin"].includes(role))
       pages.push(["projects", "Chantiers"]);
-    if (["conducteur", "rh", "admin"].includes(role))
-      pages.push(["stats", "Avancement"]);
-    if (["rh", "admin"].includes(role))
-      pages.push(["it-settings", "Paramètres IT"]);
     pages.push(["leaves", "Congés & RTT"]);
     pages.push(["legacy", "Fiches d’heures"]);
-    pages.push(["settings", "Paramètres"]);
     return pages;
   }
 
   function appScreen() {
     const pages = allowedPages();
-    if (!pages.some((x) => x[0] === currentPage)) currentPage = "home";
+    if (currentPage === "review") currentPage = "team";
+    if (["stats", "it-settings"].includes(currentPage)) {
+      routeIntent = { ...(routeIntent || {}), projectTab: currentPage };
+      currentPage = "projects";
+    }
+    if (currentPage !== "settings" && !pages.some((x) => x[0] === currentPage)) currentPage = "home";
     const role = visibleRole();
     const preview = isEthan()
       ? `<label class="v66-role-preview"><span>Aperçu test</span><select id="v66RolePreview">${Object.entries(
@@ -261,7 +261,7 @@ async function boot(db) {
           )
           .join("")}</select></label>`
       : "";
-    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? '<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste RH.</div>' : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}<button id="v66Logout">Déconnexion</button></nav><main class="v66-main" id="v66Content"></main>`;
+    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span><button type="button" class="v66-settings-button ${currentPage === "settings" ? "active" : ""}" id="v66Settings" title="Paramètres du compte" aria-label="Paramètres du compte">⚙</button></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? '<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste RH.</div>' : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}</nav><main class="v66-main" id="v66Content"></main>`;
     renderOffline();
     shell.querySelectorAll("[data-page]").forEach(
       (b) =>
@@ -269,7 +269,7 @@ async function boot(db) {
           navigateTo(b.dataset.page);
         }),
     );
-    shell.querySelector("#v66Logout").onclick = () => db.auth.signOut();
+    shell.querySelector("#v66Settings").onclick = () => navigateTo("settings");
     shell.querySelector("#v66RolePreview")?.addEventListener("change", (e) => {
       previewRole = e.target.value === profile.role ? null : e.target.value;
       currentPage = "home";
@@ -278,9 +278,8 @@ async function boot(db) {
     const content = shell.querySelector("#v66Content");
     if (currentPage === "home") renderHome(content);
     if (currentPage === "accounts") renderAccounts(content);
-    if (currentPage === "review") renderSheetExplorer(content, true);
-    if (currentPage === "team") renderSheetExplorer(content, false);
-    if (currentPage === "projects") renderProjects(content);
+    if (currentPage === "team") renderSheetExplorer(content, role === "rh");
+    if (currentPage === "projects") renderProjectHub(content);
     if (currentPage === "stats") renderStats(content);
     if (currentPage === "it-settings") renderItSettings(content);
     if (currentPage === "leaves") renderLeaves(content);
@@ -305,17 +304,17 @@ async function boot(db) {
         ]);
         if (accounts.error) throw accounts.error;if (leaves.error) throw leaves.error;if (roster.error) throw roster.error;
         const missing = (roster.data || []).filter((r) => r.expected && !r.timesheet_id).length;
-        dashboard.innerHTML = `<button class="v66-action-card" data-go="accounts"><span>Comptes en attente</span><strong>${accounts.count || 0}</strong><small>Valider ou refuser les demandes</small></button><button class="v66-action-card" data-go="leaves"><span>Congés & RTT à traiter</span><strong>${leaves.count || 0}</strong><small>Ouvrir les demandes récentes</small></button><button class="v66-action-card" data-go="review"><span>Fiches manquantes</span><strong>${missing}</strong><small>${esc(weekTitle(previous.year, previous.week))}</small></button>`;
+        dashboard.innerHTML = `<button class="v66-action-card" data-go="accounts"><span>Comptes en attente</span><strong>${accounts.count || 0}</strong><small>Valider ou refuser les demandes</small></button><button class="v66-action-card" data-go="leaves"><span>Congés & RTT à traiter</span><strong>${leaves.count || 0}</strong><small>Ouvrir les demandes récentes</small></button><button class="v66-action-card" data-go="team"><span>Fiches manquantes</span><strong>${missing}</strong><small>${esc(weekTitle(previous.year, previous.week))}</small></button>`;
         dashboard.querySelector('[data-go="accounts"]').onclick=()=>navigateTo("accounts",{status:"pending"});
         dashboard.querySelector('[data-go="leaves"]').onclick=()=>navigateTo("leaves",{group:"pending"});
-        dashboard.querySelector('[data-go="review"]').onclick=()=>navigateTo("review",{year:previous.year,week:previous.week,filter:"missing"});
+        dashboard.querySelector('[data-go="team"]').onclick=()=>navigateTo("team",{year:previous.year,week:previous.week,filter:"missing"});
       } else if (role === "conducteur") {
         const { data: projects, error } = await db.from("projects").select("id,code,name,planned_end_date,planned_hours,status,project_conductors!inner(conductor_id)").eq("project_conductors.conductor_id",profile.id).in("status",["active","overdue"]).order("planned_end_date",{ascending:true}).limit(8);
         if(error)throw error;
         const ids=(projects||[]).map(p=>p.id);let actual=new Map();
         if(ids.length){const {data:sites,error:se}=await db.from("timesheet_sites").select("project_id,hours").in("project_id",ids);if(se)throw se;(sites||[]).forEach(x=>actual.set(x.project_id,(actual.get(x.project_id)||0)+Number(x.hours||0)))}
         dashboard.innerHTML = (projects||[]).length ? `<div class="v66-card v66-dashboard-wide"><h2>Chantiers en cours</h2><div class="v66-list">${projects.map(p=>{const used=actual.get(p.id)||0,pct=Number(p.planned_hours)>0?Math.round(used/Number(p.planned_hours)*100):0;return `<button class="v66-project-shortcut" data-project="${p.id}"><span><strong>${esc(p.code)} — ${esc(p.name)}</strong><small>Fin prévue : ${fmtDate(p.planned_end_date)}</small></span><span><b>${pct}%</b><small>${used.toLocaleString("fr-FR")} / ${Number(p.planned_hours||0).toLocaleString("fr-FR")} h</small></span></button>`}).join("")}</div></div>` : '<div class="v66-card v66-empty">Aucun chantier en cours ne t’est attribué.</div>';
-        dashboard.querySelectorAll("[data-project]").forEach(b=>b.onclick=()=>navigateTo("stats",{projectId:b.dataset.project}));
+        dashboard.querySelectorAll("[data-project]").forEach(b=>b.onclick=()=>navigateTo("projects",{projectTab:"stats",projectId:b.dataset.project}));
       } else {
         const now=currentIsoWeek(),{data,error}=await db.from("timesheets").select("id,status,iso_year,iso_week").eq("employee_id",profile.id).eq("iso_year",now.year).eq("iso_week",now.week).maybeSingle();if(error)throw error;
         const editable=!data||["draft","rejected","changed_after_validation"].includes(data.status),label=!data?"Remplir ma fiche":editable?"Continuer ma fiche":"Voir ma fiche";
@@ -1067,6 +1066,16 @@ async function boot(db) {
     };
   }
 
+  function renderProjectHub(root) {
+    const role=visibleRole(), intent=routeIntent, requested=intent?.projectTab;
+    let active=requested||"projects";routeIntent=null;
+    if(active==="it-settings"&&!['rh','admin'].includes(role))active="projects";
+    root.innerHTML=`<div class="v66-pagehead"><div><h1>Chantiers</h1><p>Gestion, avancement et paramètres associés dans une seule rubrique.</p></div></div><div class="v66-subnav"><button data-project-tab="projects">Gestion des chantiers</button><button data-project-tab="stats">Avancement</button>${['rh','admin'].includes(role)?'<button data-project-tab="it-settings">Paramètres IT</button>':''}</div><section id="v66ProjectContent"></section>`;
+    const content=root.querySelector("#v66ProjectContent");
+    const show=(tab)=>{active=tab;root.querySelectorAll("[data-project-tab]").forEach(b=>b.classList.toggle("active",b.dataset.projectTab===tab));if(tab==="stats"){routeIntent=intent?.projectId?{projectId:intent.projectId}:null;renderStats(content)}else if(tab==="it-settings")renderItSettings(content);else renderProjects(content)};
+    root.querySelectorAll("[data-project-tab]").forEach(b=>b.onclick=()=>show(b.dataset.projectTab));show(active);
+  }
+
   async function renderProjects(root) {
     const role = visibleRole();
     root.innerHTML = `<div class="v66-pagehead"><div><h1>Chantiers</h1><p>Codes, dates, prévisionnel et conducteurs affectés.</p></div><button class="v66-btn primary" id="v66NewProject">Nouveau chantier</button></div>${role === "conducteur" ? '<div class="v66-info">Tu peux créer un chantier et modifier ceux auxquels tu es affecté. L’archivage et les affectations restent gérés par les RH.</div>' : ""}<input class="v66-search" id="v66ProjectSearch" placeholder="Rechercher par code ou nom…"><div class="v66-list" id="v66Projects" style="margin-top:12px"><div class="v66-card v66-empty">Chargement…</div></div>`;
@@ -1106,8 +1115,7 @@ async function boot(db) {
                 )),
           );
       };
-      const intended=routeIntent?.projectId?(projects||[]).find(p=>p.id===routeIntent.projectId):null;
-      const initial=intended?`${intended.code}`:"";routeIntent=null;root.querySelector("#v66StatsSearch").value=initial;paint(initial);
+      paint("");
       root.querySelector("#v66ProjectSearch").oninput = (e) =>
         paint(e.target.value);
     } catch (e) {
@@ -1118,11 +1126,11 @@ async function boot(db) {
 
   const sheetLabels = {
     draft: "Brouillon",
-    submitted: "Envoyée",
-    pending_review: "À valider",
+    submitted: "Transmise",
+    pending_review: "Transmise",
     rejected: "À corriger",
-    validated: "Validée",
-    changed_after_validation: "À valider",
+    validated: "Transmise",
+    changed_after_validation: "Transmise",
   };
   const monthLabels = [
     "Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
@@ -1151,7 +1159,7 @@ async function boot(db) {
 
   async function renderSheetExplorer(root, canReview) {
     const role = visibleRole();
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches partagées" : "Fiches équipes"}</h1><p>Année → mois → semaine → salariés. Le détail est chargé uniquement à l’ouverture.</p></div></div><div class="v66-filterbar"><input class="v66-search" id="v66SheetSearch" placeholder="Rechercher un salarié…"><select id="v66SheetFilter"><option value="all">Toutes</option><option value="missing">À recevoir / manquantes</option><option value="received">Reçues</option><option value="pending">À traiter</option><option value="validated">Validées</option><option value="rejected">Refusées</option><option value="absent">Absents / dispensés</option></select></div><div id="v66SheetTree" class="v66-tree"><div class="v66-card v66-empty">Chargement de l’index léger…</div></div>`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches des salariés" : "Fiches équipes"}</h1><p>Année → mois → semaine → salariés. Les fiches transmises ne demandent aucune validation.</p></div></div><div class="v66-filterbar"><input class="v66-search" id="v66SheetSearch" placeholder="Rechercher un salarié…"><select id="v66SheetFilter"><option value="all">Toutes</option><option value="missing">À recevoir / manquantes</option><option value="received">Reçues</option><option value="warning">À vérifier</option><option value="absent">Absents / dispensés</option></select></div><div id="v66SheetTree" class="v66-tree"><div class="v66-card v66-empty">Chargement de l’index léger…</div></div>`;
     try {
       let query = db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,submitted_at,reviewed_at,profiles!timesheets_employee_id_fkey(first_name,last_name,email)")
         .order("iso_year", { ascending: false }).order("iso_week", { ascending: false }).limit(500);
@@ -1199,18 +1207,20 @@ async function boot(db) {
         if (error) throw error;
         rows=(data||[]).map(x=>({...x,...x.profiles,expected:true,absent_full_week:false}));
       }
-      const counts={expected:rows.filter(x=>x.expected).length,validated:rows.filter(x=>x.sheet_status==="validated").length,pending:rows.filter(x=>["submitted","pending_review","changed_after_validation"].includes(x.sheet_status)).length,rejected:rows.filter(x=>x.sheet_status==="rejected").length,absent:rows.filter(x=>x.absent_full_week).length};
-      const rate=counts.expected?counts.validated/counts.expected*100:100;
-      body.innerHTML=`<div class="v66-week-summary"><strong>${counts.expected} fiches attendues sur ${rows.length} salariés</strong><span>${counts.validated} validées</span><span>${counts.pending} à traiter</span><span>${counts.rejected} refusées</span><span>${counts.absent} dispensés</span><b>${rate.toLocaleString("fr-FR",{maximumFractionDigits:1})} % validées</b></div><div class="v66-employee-list"></div>`;
+      const ids=rows.map(r=>r.timesheet_id).filter(Boolean),warningMap=new Map();
+      if(ids.length){const{data:details,error:detailsError}=await db.from("timesheets").select("id,timesheet_days(work_date,it_needs_review,timesheet_sites(project_id,hours))").in("id",ids);if(detailsError)throw detailsError;(details||[]).forEach(s=>{const reasons=timesheetWarnings(s);if(reasons.length)warningMap.set(s.id,reasons)})}
+      const counts={expected:rows.filter(x=>x.expected).length,received:rows.filter(x=>x.timesheet_id).length,missing:rows.filter(x=>x.expected&&!x.timesheet_id).length,warnings:rows.filter(x=>warningMap.has(x.timesheet_id)).length,absent:rows.filter(x=>x.absent_full_week).length};
+      const rate=counts.expected?counts.received/counts.expected*100:100;
+      body.innerHTML=`<div class="v66-week-summary"><strong>${counts.expected} fiches attendues sur ${rows.length} salariés</strong><span>${counts.received} transmises</span><span>${counts.missing} manquantes</span><span>${counts.warnings} à vérifier</span><span>${counts.absent} dispensés</span><b>${rate.toLocaleString("fr-FR",{maximumFractionDigits:1})} % reçues</b></div><div class="v66-employee-list"></div>`;
       const list=body.querySelector(".v66-employee-list"), search=rootQuery("#v66SheetSearch"), filter=rootQuery("#v66SheetFilter");
       const paint=()=>{
         const q=normalizeSearch(search?.value), f=filter?.value||"all";
         const filtered=rows.filter(r=>{
-          const status=r.absent_full_week?"absent":!r.timesheet_id?"missing":["submitted","pending_review","changed_after_validation"].includes(r.sheet_status)?"pending":r.sheet_status;
+          const status=r.absent_full_week?"absent":!r.timesheet_id?"missing":warningMap.has(r.timesheet_id)?"warning":"received";
           const matchFilter=f==="all"||(f==="received"&&!!r.timesheet_id)||f===status;
           return matchFilter&&normalizeSearch(`${r.first_name||""} ${r.last_name||""}`).includes(q);
         });
-        list.innerHTML=filtered.map(r=>{const status=r.absent_full_week?"Dispensé — absence validée":!r.timesheet_id?"À recevoir":sheetLabels[r.sheet_status]||r.sheet_status;return `<button type="button" class="v66-employee" ${r.timesheet_id?`data-sheet-id="${r.timesheet_id}"`:"disabled"}><span><strong>${esc(`${r.first_name||""} ${r.last_name||""}`.trim()||r.email)}</strong><small>${r.rejection_reason?`Motif : ${esc(r.rejection_reason)}`:"Touchez pour ouvrir la fiche"}</small></span><span class="v66-pill ${esc(r.sheet_status||"")}">${esc(status)}</span></button>`}).join("")||'<div class="v66-empty">Aucun résultat.</div>';
+        list.innerHTML=filtered.map(r=>{const warning=warningMap.get(r.timesheet_id),status=r.absent_full_week?"Dispensé — absence validée":!r.timesheet_id?"À recevoir":warning?"⚠ Fiche à vérifier":"Transmise";return `<button type="button" class="v66-employee ${warning?"v66-has-warning":""}" ${r.timesheet_id?`data-sheet-id="${r.timesheet_id}"`:"disabled"}><span><strong>${esc(`${r.first_name||""} ${r.last_name||""}`.trim()||r.email)}${warning?' <b class="v66-warning-star" aria-label="Fiche à vérifier">*</b>':''}</strong><small>${warning?esc(warning.join(" · ")):"Touchez pour ouvrir la fiche complète"}</small></span><span class="v66-pill ${warning?"warning":esc(r.sheet_status||"")}">${esc(status)}</span></button>`}).join("")||'<div class="v66-empty">Aucun résultat.</div>';
         list.querySelectorAll("[data-sheet-id]").forEach(b=>{b.onclick=()=>openTimesheetDetail(b.dataset.sheetId,canReview);b.ondblclick=b.onclick});
       };
       if(search)search.addEventListener("input",paint);if(filter)filter.addEventListener("change",paint);paint();
@@ -1220,18 +1230,19 @@ async function boot(db) {
   function normalizeSearch(value){return String(value||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9@.+-]+/g," ").trim()}
   function editDistanceAtMostOne(a,b){if(Math.abs(a.length-b.length)>1)return false;let i=0,j=0,d=0;while(i<a.length&&j<b.length){if(a[i]===b[j]){i++;j++;continue}if(++d>1)return false;if(a.length>b.length)i++;else if(b.length>a.length)j++;else{i++;j++}}return d+(i<a.length||j<b.length?1:0)<=1}
   function smartSearchMatch(value,query){const q=normalizeSearch(query);if(!q)return true;const words=normalizeSearch(value).split(" ").filter(Boolean);return q.split(" ").filter(Boolean).every(token=>words.some(word=>word.includes(token)||token.includes(word)||(token.length>=5&&editDistanceAtMostOne(word,token))))}
+  function timesheetWarnings(sheet){const days=sheet?.timesheet_days||[],reasons=[];let total=0;days.forEach(d=>{const hours=(d.timesheet_sites||[]).reduce((n,s)=>n+Number(s.hours||0),0);total+=hours;const weekday=new Date(`${d.work_date}T12:00:00`).getDay();if(hours>12)reasons.push(`Plus de 12 h le ${fmtDate(d.work_date)}`);if(hours>0&&(weekday===0||weekday===6))reasons.push(`Travail le week-end (${fmtDate(d.work_date)})`);if(d.it_needs_review)reasons.push(`IT à vérifier le ${fmtDate(d.work_date)}`);if((d.timesheet_sites||[]).some(s=>!s.project_id))reasons.push(`Chantier non référencé le ${fmtDate(d.work_date)}`)});if(total>55)reasons.push(`Total inhabituel : ${total.toLocaleString("fr-FR")} h`);return [...new Set(reasons)]}
 
   async function openTimesheetDetail(id, canReview) {
     const modal=el("div",{class:"v66-modal"},'<div class="v66-card"><div class="v66-empty">Chargement de la fiche…</div></div>');document.body.appendChild(modal);
     try{
       const [{data:s,error},{data:zones,error:ze}]=await Promise.all([
-        db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single(),
+        db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single(),
         canReview?db.from("it_zones").select("id,label").eq("active",true).order("label"):Promise.resolve({data:[],error:null})
       ]);if(error)throw error;if(ze)throw ze;
-      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0);
-      modal.innerHTML=`<article class="v66-card v66-sheet-detail" data-id="${s.id}"><div class="v66-pagehead"><div><h2>${esc(fullName(s.profiles))}</h2><p>${weekTitle(s.iso_year,s.iso_week)} · ${hours.toLocaleString("fr-FR")} h</p></div><button class="v66-btn" data-close>Fermer</button></div><div class="v66-list">${(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>`<div class="v66-row"><div><strong>${fmtDate(d.work_date)}</strong><small>${(d.timesheet_sites||[]).map(x=>`${esc(x.project_code_snapshot)} ${esc(x.project_name_snapshot)} — ${Number(x.hours||0).toLocaleString("fr-FR")} h ${x.project_id?"":'<em class="v66-unreferenced">Chantier non référencé</em>'}`).join("<br>")||"Aucun chantier"}</small></div><div><small>Repas : ${Number(d.meal||0).toLocaleString("fr-FR")}</small><small>IT : ${esc(d.it_zone_label_snapshot||"Non renseignée")}</small><small>${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"Aucune tâche")}</small></div></div>`).join("")}</div>${s.observations?`<p class="v66-info">${esc(s.observations)}</p>`:""}${canReview&&["submitted","pending_review","changed_after_validation"].includes(s.status)?'<div class="v66-actions"><button class="v66-btn danger" data-review="rejected">Refuser</button><button class="v66-btn primary" data-review="validated">Valider</button></div>':""}</article>`;
+      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),warnings=timesheetWarnings(s),editable=canReview&&visibleRole()==="rh";
+      modal.innerHTML=`<article class="v66-card v66-sheet-detail" data-id="${s.id}"><div class="v66-pagehead"><div><h2>Fiche d’heures — ${esc(fullName(s.profiles))}</h2><p>${weekTitle(s.iso_year,s.iso_week)} · ${hours.toLocaleString("fr-FR")} h · ${esc(sheetLabels[s.status]||"Transmise")}</p></div><button class="v66-btn" data-close>Fermer</button></div>${warnings.length?`<div class="v66-sheet-warning"><strong>⚠ Fiche à vérifier</strong><ul>${warnings.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:'<div class="v66-sheet-ok">Aucune anomalie automatique détectée.</div>'}<div class="v66-full-sheet"><div class="v66-sheet-row v66-sheet-heading"><span>Date</span><span>Chantier</span><span>Heures</span><span>Repas</span><span>IT</span><span>Tâches</span></div>${(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>(d.timesheet_sites||[]).map((x,i)=>`<div class="v66-sheet-row"><span><strong>${i?"":fmtDate(d.work_date)}</strong></span><span>${esc(x.project_code_snapshot||"—")} — ${esc(x.project_name_snapshot||"Chantier non renseigné")} ${x.project_id?"":'<em class="v66-unreferenced">Non référencé</em>'}</span><span>${editable?`<input class="v66-inline-input" type="number" min="0" max="24" step="0.5" value="${Number(x.hours||0)}" data-site-hours="${x.id}">`:`${Number(x.hours||0).toLocaleString("fr-FR")} h`}</span><span>${i?"":editable?`<input class="v66-inline-input" type="number" min="0" max="1" step="1" value="${Number(d.meal||0)}" data-day-meal="${d.id}">`:Number(d.meal||0).toLocaleString("fr-FR")}</span><span>${i?"":esc(d.it_zone_label_snapshot||"Non renseignée")}</span><span>${i?"":editable?`<input class="v66-inline-input" value="${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", "))}" data-day-task="${d.id}">`:esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"Aucune tâche")}</span></div>`).join("")||`<div class="v66-sheet-row"><span><strong>${fmtDate(d.work_date)}</strong></span><span>Aucun chantier</span><span>0 h</span><span>${Number(d.meal||0)}</span><span>${esc(d.it_zone_label_snapshot||"Non renseignée")}</span><span>${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"Aucune tâche")}</span></div>`).join("")}</div><label class="v66-field v66-sheet-note">Observations<textarea ${editable?'data-sheet-observations':''} ${editable?'':'readonly'}>${esc(s.observations||"")}</textarea></label>${editable?'<div class="v66-actions"><button class="v66-btn primary" data-save-sheet>Enregistrer les modifications RH</button></div>':''}</article>`;
       modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.onclick=e=>{if(e.target===modal)modal.remove()};
-      modal.querySelectorAll("[data-review]").forEach(b=>b.onclick=async()=>{const decision=b.dataset.review,reason=decision==="rejected"?prompt("Motif du refus :")||"":"";if(decision==="rejected"&&!reason.trim())return;b.disabled=true;const{error}=await db.rpc("review_timesheet",{target_id:id,decision,reason});if(error){fail(error);b.disabled=false;return}toast(decision==="validated"?"Fiche validée.":"Fiche refusée.");modal.remove();appScreen()});
+      modal.querySelector("[data-save-sheet]")?.addEventListener("click",async e=>{const button=e.currentTarget;button.disabled=true;try{for(const input of modal.querySelectorAll("[data-site-hours]")){const{error}=await db.from("timesheet_sites").update({hours:Number(input.value)}).eq("id",input.dataset.siteHours);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-meal]")){const{error}=await db.from("timesheet_days").update({meal:Number(input.value)}).eq("id",input.dataset.dayMeal);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-task]")){const{error}=await db.from("timesheet_days").update({manual_task:input.value.trim()}).eq("id",input.dataset.dayTask);if(error)throw error}const{error}=await db.from("timesheets").update({observations:modal.querySelector("[data-sheet-observations]").value}).eq("id",id);if(error)throw error;toast("Modifications RH enregistrées.");modal.remove();appScreen()}catch(err){fail(err);button.disabled=false}});
     }catch(e){modal.innerHTML=`<div class="v66-card"><button class="v66-btn" data-close>Fermer</button><div class="v66-empty">${esc(e.message)}</div></div>`;modal.querySelector("[data-close]").onclick=()=>modal.remove()}
   }
 
@@ -1532,7 +1543,8 @@ async function boot(db) {
               .join("")
           : '<div class="v66-card v66-empty">Aucun chantier trouvé.</div>';
       };
-      paint("");
+      const intended=routeIntent?.projectId?projects.find(p=>p.id===routeIntent.projectId):null;
+      const initial=intended?intended.code:"";routeIntent=null;root.querySelector("#v66StatsSearch").value=initial;paint(initial);
       root.querySelector("#v66StatsSearch").oninput = (e) =>
         paint(e.target.value);
     } catch (e) {
@@ -1542,13 +1554,12 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Mes fiches d’heures</h1><p>Complète ta semaine actuelle ou retrouve une ancienne fiche.</p></div><div class="v66-actions"><button class="v66-btn" id="v66OtherWeek">Autre semaine</button><button class="v66-btn primary" id="v66CurrentSheet">Chargement…</button></div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div>`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète la semaine actuelle ou consulte tes fiches personnelles.</p></div><div class="v66-actions v66-sheet-actions"><button class="v66-btn primary" id="v66CurrentSheet">Compléter ma fiche</button><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button></div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>`;
     try {
       if (navigator.onLine) await syncLegacySheets();
-      const sheets=await loadMySheets(root),now=currentIsoWeek(),intent=routeIntent?.year?routeIntent:null,target=intent||now,current=sheets.find(s=>Number(s.iso_year)===Number(target.year)&&Number(s.iso_week)===Number(target.week));
-      const editable=!current||["draft","rejected","changed_after_validation"].includes(current.status),button=root.querySelector("#v66CurrentSheet");button.textContent=!current?"Nouvelle fiche":editable?"Compléter ma fiche":"Voir ma fiche";
-      const openTarget=()=>{if(current&&!editable)return openTimesheetDetail(current.id,false);openLegacyEditor(root,target.year,target.week)};button.onclick=openTarget;
-      root.querySelector("#v66OtherWeek").onclick=()=>chooseLegacyWeek(root,sheets);
+      const sheets=await loadMySheets(root),now=currentIsoWeek(),intent=routeIntent?.year?routeIntent:null,target=intent||now;
+      const openTarget=()=>openLegacyEditor(root,target.year,target.week);root.querySelector("#v66CurrentSheet").onclick=openTarget;
+      root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"})};
       if(intent?.open){routeIntent=null;openTarget()}
     } catch (e) {
       root.querySelector("#v66MySheets").innerHTML =
@@ -1567,7 +1578,9 @@ async function boot(db) {
   async function renderSettings(root){
     let establishmentName="Non attribué";
     if(profile.establishment_id){const{data}=await db.from("establishments").select("name").eq("id",profile.establishment_id).maybeSingle();if(data?.name)establishmentName=data.name}
-    root.innerHTML=`<div class="v66-pagehead"><div><h1>Paramètres</h1><p>Informations personnelles et sécurité de ton compte.</p></div></div><div class="v66-settings-grid"><form class="v66-card v66-form" id="v66PersonalForm"><h2>Mes informations</h2><div class="v66-grid"><label class="v66-field">Prénom<input name="first_name" required maxlength="80" value="${esc(profile.first_name||"")}"></label><label class="v66-field">Nom<input name="last_name" required maxlength="80" value="${esc(profile.last_name||"")}"></label></div><label class="v66-field">Adresse e-mail<input value="${esc(profile.email||session?.user?.email||"")}" readonly></label><div class="v66-account-readonly"><span><small>Matricule</small><strong>${esc(profile.employee_number||"Non renseigné")}</strong></span><span><small>Rôle</small><strong>${esc(roleLabels[profile.role]||profile.role)}</strong></span><span><small>Siège</small><strong>${esc(establishmentName)}</strong></span><span><small>Statut</small><strong>${esc(statusLabels[profile.status]||profile.status)}</strong></span></div><p class="v66-help">Le matricule, le rôle, le siège et le statut sont gérés par les RH.</p><div class="v66-actions"><button class="v66-btn primary">Enregistrer mes informations</button></div><div class="v66-message"></div></form><form class="v66-card v66-form" id="v66PasswordForm"><h2>Changer mon mot de passe</h2><label class="v66-field">Nouveau mot de passe<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label class="v66-field">Confirmer le mot de passe<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label><p class="v66-help">Utilise au minimum 8 caractères. Ton mot de passe ne sera jamais affiché ni enregistré dans le code.</p><div class="v66-actions"><button class="v66-btn primary">Changer mon mot de passe</button></div><div class="v66-message"></div></form></div>`;
+    root.innerHTML=`<div class="v66-pagehead"><div><h1>Paramètres du compte</h1><p>Informations personnelles, sécurité et connexion.</p></div><button class="v66-btn" id="v66SettingsBack">Retour</button></div><div class="v66-settings-grid"><form class="v66-card v66-form" id="v66PersonalForm"><h2>Mes informations</h2><div class="v66-grid"><label class="v66-field">Prénom<input name="first_name" required maxlength="80" value="${esc(profile.first_name||"")}"></label><label class="v66-field">Nom<input name="last_name" required maxlength="80" value="${esc(profile.last_name||"")}"></label></div><label class="v66-field">Adresse e-mail<input value="${esc(profile.email||session?.user?.email||"")}" readonly></label><div class="v66-account-readonly"><span><small>Matricule</small><strong>${esc(profile.employee_number||"Non renseigné")}</strong></span><span><small>Rôle</small><strong>${esc(roleLabels[profile.role]||profile.role)}</strong></span><span><small>Siège</small><strong>${esc(establishmentName)}</strong></span><span><small>Statut</small><strong>${esc(statusLabels[profile.status]||profile.status)}</strong></span></div><p class="v66-help">Le matricule, le rôle, le siège et le statut sont gérés par les RH.</p><div class="v66-actions"><button class="v66-btn primary">Enregistrer mes informations</button></div><div class="v66-message"></div></form><form class="v66-card v66-form" id="v66PasswordForm"><h2>Changer mon mot de passe</h2><label class="v66-field">Nouveau mot de passe<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label class="v66-field">Confirmer le mot de passe<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label><p class="v66-help">Utilise au minimum 8 caractères. Ton mot de passe ne sera jamais affiché ni enregistré dans le code.</p><div class="v66-actions"><button class="v66-btn primary">Changer mon mot de passe</button></div><div class="v66-message"></div></form><section class="v66-card v66-logout-card"><h2>Session</h2><p class="v66-help">Fermer ta session sur cet appareil.</p><button type="button" class="v66-btn danger" id="v66SettingsLogout">Se déconnecter</button></section></div>`;
+    root.querySelector("#v66SettingsBack").onclick=()=>history.length>1?history.back():navigateTo("home");
+    root.querySelector("#v66SettingsLogout").onclick=()=>confirm("Voulez-vous vraiment vous déconnecter ?")&&db.auth.signOut();
     root.querySelector("#v66PersonalForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,msg=form.querySelector(".v66-message"),button=form.querySelector("button"),fd=new FormData(form);button.disabled=true;try{const{data,error}=await db.rpc("update_own_profile",{new_first_name:fd.get("first_name").trim(),new_last_name:fd.get("last_name").trim()});if(error)throw error;profile={...profile,...data};setMessage(msg,"Informations mises à jour.","ok");toast("Profil mis à jour.")}catch(err){setMessage(msg,err.message,"error")}finally{button.disabled=false}};
     root.querySelector("#v66PasswordForm").onsubmit=async e=>{e.preventDefault();const form=e.currentTarget,msg=form.querySelector(".v66-message"),button=form.querySelector("button"),fd=new FormData(form),password=String(fd.get("password")||""),confirmation=String(fd.get("confirm_password")||"");if(password!==confirmation)return setMessage(msg,"Les deux mots de passe ne correspondent pas.","error");button.disabled=true;try{const{error}=await db.auth.updateUser({password});if(error)throw error;form.reset();setMessage(msg,"Mot de passe modifié avec succès.","ok");toast("Mot de passe modifié.")}catch(err){setMessage(msg,err.message,"error")}finally{button.disabled=false}};
   }

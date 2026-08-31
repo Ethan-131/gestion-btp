@@ -663,7 +663,7 @@ async function boot(db) {
       : `${fmtDate(p.start_date)} → ${fmtDate(p.end_date)} · ${type} · ${p.requested_days} jours`;
   }
 
-  async function renderLeaves(root, monthOffset = 0) {
+  async function renderLeaves(root, monthOffset = 0, calendarVisible = false) {
     const role = visibleRole(),
       canReview = role === "rh",
       canCreate = ["salarie", "conducteur", "rh", "admin"].includes(role);
@@ -676,15 +676,14 @@ async function boot(db) {
       last = new Date(
         Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0),
       );
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Congés & RTT</h1><p>Clique une première date de début, puis une date de fin dans le calendrier.</p></div>${canCreate ? '<button class="v66-btn primary" id="v66NewLeave">Sélectionner des dates</button>' : ""}</div><div class="v66-info" id="v66RangeHint">Premier clic : début · second clic : fin</div><div class="v66-calendar-head"><button class="v66-btn" id="v66PrevMonth">‹</button><strong>${first.toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" })}</strong><button class="v66-btn" id="v66NextMonth">›</button></div><div class="v66-calendar" id="v66LeaveCalendar"><div class="v66-empty">Chargement du calendrier…</div></div><div class="v66-pagehead" style="margin-top:22px"><div><h2>${canReview ? "Demandes à traiter et historique" : "Mes demandes"}</h2></div></div><div class="v66-list" id="v66LeaveList"><div class="v66-card v66-empty">Chargement…</div></div>`;
-    root.querySelector("#v66PrevMonth").onclick = () =>
-      renderLeaves(root, monthOffset - 1);
-    root.querySelector("#v66NextMonth").onclick = () =>
-      renderLeaves(root, monthOffset + 1);
-    root.querySelector("#v66NewLeave")?.addEventListener("click", () => {
-      root.querySelector("#v66LeaveCalendar").scrollIntoView({ behavior: "smooth", block: "center" });
-      toast("Choisis la date de début, puis la date de fin.");
-    });
+    const years=Array.from({length:81},(_,i)=>2020+i);
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Congés & RTT</h1><p>Choisis d’abord le mois et l’année à afficher.</p></div></div><section class="v66-card v66-calendar-picker"><label>Mois<select id="v66LeaveMonth">${monthLabels.map((label,index)=>`<option value="${index}" ${index===first.getUTCMonth()?"selected":""}>${label}</option>`).join("")}</select></label><label>Année<select id="v66LeaveYear">${years.map(year=>`<option value="${year}" ${year===first.getUTCFullYear()?"selected":""}>${year}</option>`).join("")}</select></label><button type="button" class="v66-btn primary" id="v66ShowLeaveCalendar">Afficher le calendrier</button></section><section id="v66LeaveCalendarSection" ${calendarVisible?"":"hidden"}><div class="v66-info" id="v66RangeHint">Premier clic : début · second clic : fin</div><div class="v66-calendar-head"><button class="v66-btn" id="v66PrevMonth">‹</button><strong>${first.toLocaleDateString("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" })}</strong><button class="v66-btn" id="v66NextMonth">›</button></div><div class="v66-calendar" id="v66LeaveCalendar"><div class="v66-empty">Chargement du calendrier…</div></div></section><div class="v66-pagehead" style="margin-top:22px"><div><h2>${canReview ? "Demandes à traiter et historique" : "Mes demandes"}</h2></div></div><div class="v66-list" id="v66LeaveList"><div class="v66-card v66-empty">Chargement…</div></div>`;
+    root.querySelector("#v66ShowLeaveCalendar").onclick=()=>{
+      const wantedYear=Number(root.querySelector("#v66LeaveYear").value),wantedMonth=Number(root.querySelector("#v66LeaveMonth").value),now=new Date(),offset=(wantedYear-now.getUTCFullYear())*12+wantedMonth-now.getUTCMonth();
+      renderLeaves(root,offset,true);
+    };
+    root.querySelector("#v66PrevMonth").onclick = () => renderLeaves(root, monthOffset - 1,true);
+    root.querySelector("#v66NextMonth").onclick = () => renderLeaves(root, monthOffset + 1,true);
     try {
       const { data, error } = await db
         .from("leave_requests")
@@ -695,7 +694,7 @@ async function boot(db) {
       if (error) throw error;
       const requests = data || [];
       let rangeStart = "";
-      const paintCalendar = () =>
+      const paintCalendar = () => calendarVisible &&
         renderLeaveCalendar(
           root.querySelector("#v66LeaveCalendar"),
           first,
@@ -825,7 +824,7 @@ async function boot(db) {
               });
               if (error) throw error;
               toast("Demande mise à jour.");
-              await renderLeaves(root, monthOffset);
+              await renderLeaves(root, monthOffset, calendarVisible);
             } catch (e) {
               fail(e);
             } finally {
@@ -850,7 +849,7 @@ async function boot(db) {
               if (error) throw error;
               modal.remove();
               toast("Demande mise à jour.");
-              await renderLeaves(root, monthOffset);
+              await renderLeaves(root, monthOffset, calendarVisible);
             } catch (e) {
               setMessage(msg,e.message,"error");confirmButton.disabled=false;
             }};
@@ -879,22 +878,24 @@ async function boot(db) {
       approved.forEach((r) =>
         (r.leave_periods || []).forEach((p) => {
           if (key >= p.start_date && key <= p.end_date && !weekend && !holiday)
-            people.push(
-              role === "conducteur"
-                ? fullName(r.profiles)
-                : `${fullName(r.profiles)} · ${leaveTypeLabels[p.leave_type || r.leave_type]}`,
-            );
+            people.push({name:fullName(r.profiles),type:leaveTypeLabels[p.leave_type || r.leave_type]||"Absence",duration:p.duration_type==="morning"?"Matin":p.duration_type==="afternoon"?"Après-midi":"Journée complète",establishment:r.profiles?.establishments?.name||""});
         }),
       );
       const unavailable = weekend || holiday;
       cells.push(
-        `${onSelect && !unavailable ? `<button type="button" data-leave-date="${key}" aria-label="Choisir le ${fmtDate(key)}"` : "<div"} class="v66-cal-day ${onSelect && !unavailable ? "selectable" : ""} ${key === selectedStart ? "range-start" : ""} ${weekend ? "weekend" : ""} ${holiday ? "holiday" : ""}"><b>${day}</b>${holiday ? `<span class="v66-holiday">${esc(holiday)}</span>` : ""}${people.map((x) => `<span class="v66-absence">${esc(x)}</span>`).join("")}${onSelect && !unavailable ? "</button>" : "</div>"}`,
+        `${onSelect && !unavailable ? `<button type="button" data-leave-date="${key}" aria-label="Choisir le ${fmtDate(key)}"` : "<div"} data-absence-level="${Math.min(4,people.length)}" class="v66-cal-day ${onSelect && !unavailable ? "selectable" : ""} ${key === selectedStart ? "range-start" : ""} ${weekend ? "weekend" : ""} ${holiday ? "holiday" : ""}"><b>${day}</b>${holiday ? `<span class="v66-holiday">${esc(holiday)}</span>` : ""}${people.length?`<span class="v66-absence-count" data-absence-date="${key}">${people.length} absent${people.length>1?"s":""}</span>${people.slice(0,2).map(x=>`<span class="v66-absence v66-absence-name" data-absence-date="${key}">${esc(x.name)} · ${esc(x.type)}</span>`).join("")}${people.length>2?`<span class="v66-absence-more" data-absence-date="${key}">+ ${people.length-2} autre${people.length-2>1?"s":""}</span>`:""}`:""}${onSelect && !unavailable ? "</button>" : "</div>"}`,
       );
+      if(people.length)cells[cells.length-1]=cells[cells.length-1].replace(/ class="v66-cal-day/,` data-absence-people="${esc(encodeURIComponent(JSON.stringify(people)))}" class="v66-cal-day`);
     }
     node.innerHTML = `${["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((x) => `<div class="v66-cal-label">${x}</div>`).join("")}${cells.join("")}`;
     node.querySelectorAll("[data-leave-date]").forEach(
       (day) => (day.onclick = () => onSelect(day.dataset.leaveDate)),
     );
+    node.querySelectorAll("[data-absence-date]").forEach(item=>item.onclick=event=>{event.preventDefault();event.stopPropagation();const day=item.closest(".v66-cal-day"),people=JSON.parse(decodeURIComponent(day.dataset.absencePeople||"%5B%5D"));openAbsenceDayModal(item.dataset.absenceDate,people)});
+  }
+
+  function openAbsenceDayModal(date,people){
+    const modal=el("div",{class:"v66-modal"},`<section class="v66-card v66-form v66-absence-modal"><div class="v66-pagehead"><div><h2>Absences du ${fmtDate(date)}</h2><p>${people.length} salarié${people.length>1?"s":""} absent${people.length>1?"s":""}</p></div><button type="button" class="v66-btn" data-close>Fermer</button></div><input class="v66-search" placeholder="Rechercher un nom ou un prénom…"><div class="v66-list" data-results></div></section>`);document.body.appendChild(modal);const results=modal.querySelector("[data-results]"),paint=(query="")=>{const q=normalizeSearch(query),rows=people.filter(person=>smartSearchMatch(person.name,q));results.innerHTML=rows.length?rows.map(person=>`<article class="v66-absence-person"><strong>${esc(person.name)}</strong><span>${esc(person.type)} · ${esc(person.duration)}${person.establishment?` · ${esc(person.establishment)}`:""}</span></article>`).join(""):'<div class="v66-empty">Aucun salarié trouvé.</div>'};paint();modal.querySelector("input").oninput=e=>paint(e.target.value);modal.querySelector("[data-close]").onclick=()=>modal.remove();
   }
 
   async function leaveRangeModal(start, end) {
@@ -1567,10 +1568,14 @@ async function boot(db) {
   async function renderLegacy(root) {
     const role=visibleRole(),canSeeEmployees=["conducteur","rh","admin"].includes(role),now=currentIsoWeek();
     localStorage.setItem("antras_selected_year_v1",String(now.year));
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Complète directement ta fiche de la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-native-editor"><div class="v66-card v66-empty">Chargement de la fiche actuelle…</div></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
+    const yearOptions=Array.from({length:81},(_,i)=>2020+i).map(year=>`<option value="${year}" ${year===now.year?"selected":""}>${year}</option>`).join(""),weekOptions=Array.from({length:53},(_,i)=>i+1).map(week=>`<option value="${week}" ${week===now.week?"selected":""}>Semaine ${week}</option>`).join("");
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Choisis une semaine ou complète directement la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><section class="v66-card v66-week-picker"><button type="button" class="v66-btn" id="v66PreviousWeek" aria-label="Semaine précédente">‹</button><label>Année<select id="v66TimesheetYear">${yearOptions}</select></label><label>Semaine<select id="v66TimesheetWeek">${weekOptions}</select></label><button type="button" class="v66-btn primary" id="v66ShowTimesheet">Afficher la semaine</button><button type="button" class="v66-btn" id="v66CurrentWeek">Semaine actuelle</button><button type="button" class="v66-btn" id="v66NextWeek" aria-label="Semaine suivante">›</button></section><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-native-editor"><div class="v66-card v66-empty">Chargement de la fiche actuelle…</div></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
     try {
       if (navigator.onLine) { await syncLegacySheets(); await syncNativeDrafts(); }
       await Promise.all([renderNativeCurrentTimesheet(root.querySelector("#v66CurrentSheetPanel"),now.year,now.week),loadMySheets(root)]);const intent=routeIntent;
+      const openWeek=async(year,week)=>{if(year<2020||year>2100||week<1||week>53)return toast("Choisis une année entre 2020 et 2100 et une semaine valide.");const currentForm=root.querySelector("#v66CurrentSheetPanel form");if(currentForm?.dataset.dirty==="true"&&!confirm("Des modifications ne sont pas enregistrées. Changer de semaine quand même ?"))return;root.querySelector("#v66TimesheetYear").value=String(year);root.querySelector("#v66TimesheetWeek").value=String(week);const panel=root.querySelector("#v66CurrentSheetPanel");panel.hidden=false;panel.innerHTML='<div class="v66-card v66-empty">Chargement de la semaine…</div>';await renderNativeCurrentTimesheet(panel,year,week);localStorage.setItem("antras_selected_year_v1",String(year))};
+      root.querySelector("#v66ShowTimesheet").onclick=()=>openWeek(Number(root.querySelector("#v66TimesheetYear").value),Number(root.querySelector("#v66TimesheetWeek").value));root.querySelector("#v66CurrentWeek").onclick=()=>openWeek(now.year,now.week);
+      const shiftWeek=delta=>{const year=Number(root.querySelector("#v66TimesheetYear").value),week=Number(root.querySelector("#v66TimesheetWeek").value),date=new Date(isoWeekBounds(year,week).monday);date.setUTCDate(date.getUTCDate()+delta*7);const target=isoWeekFromDate(date);openWeek(target.year,target.week)};root.querySelector("#v66PreviousWeek").onclick=()=>shiftWeek(-1);root.querySelector("#v66NextWeek").onclick=()=>shiftWeek(1);
       const hidePanels=()=>{root.querySelector("#v66CurrentSheetPanel").hidden=true;root.querySelector("#v66SavedSheetsPanel").hidden=true;const employee=root.querySelector("#v66EmployeeSheetsPanel");if(employee)employee.hidden=true};
       root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"});else root.querySelector("#v66CurrentSheetPanel").hidden=false};
       const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;const opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening){await renderSheetExplorer(panel,role==="rh");panel.scrollIntoView({behavior:"smooth",block:"start"})}else root.querySelector("#v66CurrentSheetPanel").hidden=false};
@@ -1617,7 +1622,10 @@ async function boot(db) {
     const daysMarkup=dates.map((date,index)=>{const source=localDays.get(date)||existingDays.get(date)||{},sites=source.sites||(source.timesheet_sites||[]),dayType=source.day_type||"worked";return `<section class="v66-native-day ${dayType!=="worked"?"is-absence":""}" data-date="${date}" data-type="${dayType}"><header><strong>${dayNames[index]}</strong><span>${fmtDate(date)}</span></header>${typeChoices(dayType)}<div class="v66-day-watermark">${dayType==="cp"?"CONGÉ PAYÉ":dayType==="rtt"?"RTT":dayType==="holiday"?"FÉRIÉ":""}</div><div class="v66-native-work-fields"><div class="v66-native-sites">${(sites.length?sites:[{}]).map(siteMarkup).join("")}</div><button type="button" class="v66-link-btn v66-native-add">+ Ajouter un chantier</button><div class="v66-native-day-details"><label>Repas<select class="v66-native-meal"><option value="0">0</option><option value="1" ${Number(source.meal)===1?"selected":""}>1</option></select></label><label>IT<input class="v66-native-it" value="${esc(source.it_zone_label_snapshot||source.it_zone_label||"")}" readonly placeholder="Calcul automatique"></label><label>Tâches effectuées<input class="v66-native-task" value="${esc(source.manual_task||(source.tasks||[]).join(", ")||"")}" placeholder="Travaux réalisés"></label></div><p class="v66-native-warning" hidden></p></div></section>`}).join("");
     const templateMarkup=`<section class="v66-day-template"><div><strong>Journée type</strong><small>Code et chantier sont obligatoires. Les tâches restent à compléter chaque jour.</small></div><div class="v66-day-template-fields"><label>Code chantier<input class="v66-template-code" list="v66ProjectCodes" placeholder="Code chantier"></label><label>Chantier<input class="v66-template-project" list="v66ProjectNames" placeholder="Nom du chantier"></label><label>Heures lun. à jeu.<input class="v66-template-hours" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="8"></label><label>Heures vendredi<input class="v66-template-friday" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="7"></label><label>Repas<select class="v66-template-meal"><option value="0">0</option><option value="1" selected>1</option></select></label></div><button type="button" class="v66-btn primary v66-template-apply">Appliquer à la semaine</button></section>`;
     panel.innerHTML=`<form class="v66-native-sheet"><div class="v66-native-report"><img src="antras-logo.png" alt=""><div><strong>RAPPORT HEBDOMADAIRE</strong><small>${esc(weekTitle(year,week))}</small></div></div><div class="v66-native-identity"><span>Nom : <strong>${esc(profile.last_name||"")}</strong></span><span>Prénom : <strong>${esc(profile.first_name||"")}</strong></span></div><datalist id="v66ProjectCodes">${codeOptions}</datalist><datalist id="v66ProjectNames">${nameOptions}</datalist>${templateMarkup}${daysMarkup}<label class="v66-native-observations">Observations<textarea rows="3">${esc(local?.observations||existing?.observations||"")}</textarea></label><div class="v66-week-recap"></div><div class="v66-actions"><button class="v66-btn primary" type="submit">Enregistrer et partager la fiche</button></div><div class="v66-message"></div></form>`;
-    const form=panel.querySelector("form"),normalize=v=>String(v||"").trim().toLowerCase();
+    const form=panel.querySelector("form"),normalize=v=>String(v||"").trim().toLowerCase();form.dataset.dirty="false";
+    form.addEventListener("input",()=>{form.dataset.dirty="true"});
+    form.addEventListener("change",()=>{form.dataset.dirty="true"});
+    form.addEventListener("click",event=>{if(event.target.closest(".v66-template-apply,[data-day-type],.v66-native-add,.v66-native-remove"))form.dataset.dirty="true"});
     const projectFor=(code,name)=>{const c=normalize(code),n=normalize(name);return projects.find(p=>c&&n?normalize(p.code)===c&&normalize(p.name)===n:c?normalize(p.code)===c:n?normalize(p.name)===n:false)};
     const refresh=()=>{let total=0,meals=0,worked=0,cp=0,rtt=0,holiday=0;const itList=[];form.querySelectorAll(".v66-native-day").forEach(day=>{const type=day.dataset.type||"worked",watermark=day.querySelector(".v66-day-watermark"),work=day.querySelector(".v66-native-work-fields");day.classList.toggle("is-absence",type!=="worked");watermark.textContent=type==="cp"?"CONGÉ PAYÉ":type==="rtt"?"RTT":type==="holiday"?"FÉRIÉ":"";work.querySelectorAll("input,select,button").forEach(x=>x.disabled=type!=="worked");if(type!=="worked"){if(type==="cp")cp++;if(type==="rtt")rtt++;if(type==="holiday")holiday++;return}worked++;const matches=[...day.querySelectorAll(".v66-native-site")].map(row=>projectFor(row.querySelector(".v66-native-code").value,row.querySelector(".v66-native-project").value)).filter(Boolean),unknown=[...day.querySelectorAll(".v66-native-site")].some(row=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim();return(code||name)&&(!code||!name||!projectFor(code,name))}),zones=[...new Map(matches.flatMap(p=>(p.project_it_zones||[]).filter(z=>z.establishment_id===profile.establishment_id&&z.it_zones?.label).map(z=>[z.it_zone_id,z.it_zones.label]))).values()],it=day.querySelector(".v66-native-it"),warning=day.querySelector(".v66-native-warning");it.value=zones.length===1?zones[0]:"";if(it.value)itList.push(`${day.querySelector("header strong").textContent} : ${it.value}`);warning.hidden=!(unknown||zones.length!==1&&matches.length);warning.textContent=unknown?"Attention : le code et le nom du chantier doivent être renseignés. Chantier non référencé autorisé.":zones.length>1?"Plusieurs zones IT : décision RH nécessaire.":"Zone IT non renseignée : 0 IT sera appliqué.";day.querySelectorAll(".v66-native-hours").forEach(i=>total+=Number(i.value||0));meals+=Number(day.querySelector(".v66-native-meal").value||0)});const parts=[`${worked} jour${worked>1?"s":""} travaillé${worked>1?"s":""}`];if(cp)parts.push(`${cp} jour${cp>1?"s":""} de congé payé`);if(rtt)parts.push(`${rtt} jour${rtt>1?"s":""} de RTT`);if(holiday)parts.push(`${holiday} jour${holiday>1?"s":""} férié${holiday>1?"s":""}`);form.querySelector(".v66-week-recap").innerHTML=`<strong>Compte rendu de la semaine</strong><div>${parts.map(x=>`<span>${esc(x)}</span>`).join("")}<span>${String(total).replace(".",",")} heures effectuées</span><span>${meals} repas</span></div><p><b>IT :</b> ${itList.length?esc(itList.join(" · ")):"Aucune IT"}</p>`};
     form.addEventListener("input",e=>{const row=e.target.closest(".v66-native-site");if(row&&e.target.matches(".v66-native-code")){const p=projects.find(x=>normalize(x.code)===normalize(e.target.value));if(p)row.querySelector(".v66-native-project").value=p.name}if(row&&e.target.matches(".v66-native-project")){const p=projects.find(x=>normalize(x.name)===normalize(e.target.value));if(p)row.querySelector(".v66-native-code").value=p.code}if(e.target.matches(".v66-template-code")){const p=projects.find(x=>normalize(x.code)===normalize(e.target.value));if(p)form.querySelector(".v66-template-project").value=p.name}if(e.target.matches(".v66-template-project")){const p=projects.find(x=>normalize(x.name)===normalize(e.target.value));if(p)form.querySelector(".v66-template-code").value=p.code}refresh()});

@@ -7,6 +7,7 @@ const sql=fs.readFileSync(new URL("../supabase/v67-spa-performance-corrected.sql
 const settingsSql=fs.readFileSync(new URL("../supabase/v69-account-settings.sql",import.meta.url),"utf8");
 const dayTypesSql=fs.readFileSync(new URL("../supabase/v80-timesheet-day-types.sql",import.meta.url),"utf8");
 const sw=fs.readFileSync(new URL("../sw.js",import.meta.url),"utf8");
+const css=fs.readFileSync(new URL("../css/v66.css",import.meta.url),"utf8");
 
 const checks={
   "envoi atomique":/save_and_submit_timesheet/.test(app)&&/create or replace function public\.save_and_submit_timesheet/.test(sql),
@@ -26,12 +27,12 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v81-1/.test(sw),
+  "cache PWA versionné":/antras-v82-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
   "annulation harmonisée":/v66-cancel-action/.test(app)&&/Confirmer la demande d’annulation/.test(app),
-  "actions fiche simplifiées":/Complète directement ta fiche/.test(app)&&/Mes fiches enregistrées/.test(app)&&!/id="v66OtherWeek"/.test(app),
+  "actions fiche simplifiées":/Choisis une semaine ou complète directement/.test(app)&&/Mes fiches enregistrées/.test(app)&&!/id="v66OtherWeek"/.test(app),
   "paramètres personnels":/update_own_profile/.test(app)&&/Changer mon mot de passe/.test(app),
   "profil protégé côté serveur":/security definer/.test(settingsSql)&&/where id=auth\.uid\(\)/.test(settingsSql),
   "mot de passe oublié":/resetPasswordForEmail/.test(app)&&/PASSWORD_RECOVERY/.test(app),
@@ -56,6 +57,10 @@ const checks={
   "compte rendu hebdomadaire":/Compte rendu de la semaine/.test(app)&&/v66-week-recap/.test(app)&&/v66-ro-recap/.test(app),
   "aucune application imbriquée":!/v66CurrentSheetPanel[^;]+<iframe/.test(app)&&!/index\.html\?embedded=1/.test(app),
   "ancien filtre retiré":!/id="v66SheetFilter"[^>]*<option/.test(app)&&/type="hidden" id="v66SheetFilter"/.test(app),
+  "navigation semaines étendue":/id="v66TimesheetYear"/.test(app)&&/id="v66TimesheetWeek"/.test(app)&&/id="v66PreviousWeek"/.test(app)&&/id="v66NextWeek"/.test(app)&&/Semaine actuelle/.test(app)&&/length:81/.test(app),
+  "calendrier congés sur demande":/id="v66LeaveMonth"/.test(app)&&/id="v66LeaveYear"/.test(app)&&/Afficher le calendrier/.test(app)&&/calendarVisible/.test(app),
+  "absences calendrier compactes":/people\.slice\(0,2\)/.test(app)&&/v66-absence-more/.test(app)&&/openAbsenceDayModal/.test(app)&&/v66-absence-count/.test(css),
+  "journée type proportionnée":/grid-template-columns:145px minmax\(300px,1fr\)/.test(css),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

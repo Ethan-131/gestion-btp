@@ -79,6 +79,7 @@ create table public.timesheet_days (
   id uuid primary key default gen_random_uuid(),
   timesheet_id uuid not null references public.timesheets(id) on delete cascade,
   work_date date not null,
+  day_type text not null default 'worked' check (day_type in ('worked','cp','rtt','holiday')),
   meal numeric(4,2) not null default 0,
   travel_km numeric(8,2) not null default 0,
   tasks jsonb not null default '[]'::jsonb,

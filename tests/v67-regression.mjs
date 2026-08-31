@@ -27,7 +27,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v82-1/.test(sw),
+  "cache PWA versionné":/antras-v83-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -58,7 +58,7 @@ const checks={
   "aucune application imbriquée":!/v66CurrentSheetPanel[^;]+<iframe/.test(app)&&!/index\.html\?embedded=1/.test(app),
   "ancien filtre retiré":!/id="v66SheetFilter"[^>]*<option/.test(app)&&/type="hidden" id="v66SheetFilter"/.test(app),
   "navigation semaines étendue":/id="v66TimesheetYear"/.test(app)&&/id="v66TimesheetWeek"/.test(app)&&/id="v66PreviousWeek"/.test(app)&&/id="v66NextWeek"/.test(app)&&/Semaine actuelle/.test(app)&&/length:81/.test(app),
-  "calendrier congés sur demande":/id="v66LeaveMonth"/.test(app)&&/id="v66LeaveYear"/.test(app)&&/Afficher le calendrier/.test(app)&&/calendarVisible/.test(app),
+  "calendrier congés actuel visible":/id="v66LeaveMonth"/.test(app)&&/id="v66LeaveYear"/.test(app)&&/Afficher cette période/.test(app)&&/calendarVisible = true/.test(app),
   "absences calendrier compactes":/people\.slice\(0,2\)/.test(app)&&/v66-absence-more/.test(app)&&/openAbsenceDayModal/.test(app)&&/v66-absence-count/.test(css),
   "journée type proportionnée":/grid-template-columns:145px minmax\(300px,1fr\)/.test(css),
 };

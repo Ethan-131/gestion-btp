@@ -6,6 +6,8 @@ const legacy=fs.readFileSync(new URL("../index.html",import.meta.url),"utf8");
 const sql=fs.readFileSync(new URL("../supabase/v67-spa-performance-corrected.sql",import.meta.url),"utf8");
 const settingsSql=fs.readFileSync(new URL("../supabase/v69-account-settings.sql",import.meta.url),"utf8");
 const dayTypesSql=fs.readFileSync(new URL("../supabase/v80-timesheet-day-types.sql",import.meta.url),"utf8");
+const pastLeavesSql=fs.readFileSync(new URL("../supabase/v84-block-past-leave-requests.sql",import.meta.url),"utf8");
+const accountAccessSql=fs.readFileSync(new URL("../supabase/v86-account-access-management.sql",import.meta.url),"utf8");
 const sw=fs.readFileSync(new URL("../sw.js",import.meta.url),"utf8");
 const css=fs.readFileSync(new URL("../css/v66.css",import.meta.url),"utf8");
 
@@ -27,7 +29,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v83-1/.test(sw),
+  "cache PWA versionné":/antras-v86-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -61,6 +63,10 @@ const checks={
   "calendrier congés actuel visible":/id="v66LeaveMonth"/.test(app)&&/id="v66LeaveYear"/.test(app)&&/Afficher cette période/.test(app)&&/calendarVisible = true/.test(app),
   "absences calendrier compactes":/people\.slice\(0,2\)/.test(app)&&/v66-absence-more/.test(app)&&/openAbsenceDayModal/.test(app)&&/v66-absence-count/.test(css),
   "journée type proportionnée":/grid-template-columns:145px minmax\(300px,1fr\)/.test(css),
+  "dates de congé passées bloquées":/past = key < dateKey\(new Date\(\)\)/.test(app)&&/Impossible de demander une absence sur une date déjà passée/.test(app)&&/< current_date/.test(pastLeavesSql),
+  "couleurs CP et RTT distinctes":/is-rtt/.test(app)&&/is-cp/.test(app)&&/v66-absence\.is-rtt/.test(css)&&/CP ·/.test(app),
+  "comptes séparés et comptés":/Demandes d’accès/.test(app)&&/Comptes validés/.test(app)&&/v66-account-section-head/.test(app),
+  "retrait accès sécurisé":/disable_account_access/.test(app)&&/Supprimer l’accès/.test(app)&&/is_rh_or_admin/.test(accountAccessSql)&&/status='disabled'/.test(accountAccessSql)&&/target_id = auth\.uid/.test(accountAccessSql),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

@@ -332,7 +332,7 @@ async function boot(db) {
 
   async function renderAccounts(root) {
     root.innerHTML =
-      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Validation RH et attribution du rôle initial.</p></div></div><input class="v66-search" id="v66AccountSearch" placeholder="Rechercher par nom, prénom, e-mail ou matricule…"><div class="v66-card"><div class="v66-list" id="v66Accounts"><div class="v66-empty">Chargement…</div></div></div>';
+      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Gère les demandes d’accès et les comptes autorisés.</p></div></div><input class="v66-search" id="v66AccountSearch" placeholder="Rechercher par nom, prénom, e-mail ou matricule…"><div id="v66Accounts"><div class="v66-card v66-empty">Chargement…</div></div>';
     try {
       const [{ data, error }, { data: establishments, error: estError }] =
         await Promise.all([
@@ -351,20 +351,13 @@ async function boot(db) {
       const list = root.querySelector("#v66Accounts");
       const paint = (query = "") => {
         const q = normalizeSearch(query),
-          filtered = data.filter((p) => (!pendingOnly||p.status==="pending")&&
+          filtered = data.filter((p) =>
             smartSearchMatch(
               `${p.first_name || ""} ${p.last_name || ""} ${p.email || ""} ${p.employee_number || ""}`,
               q,
             ),
-          );
-      list.innerHTML = filtered.length
-        ? filtered
-            .map(
-              (p) =>
-                `<article class="v66-row" data-id="${p.id}"><div><strong>${esc(fullName(p))}</strong><small>${esc(p.email)}${p.employee_number ? " · " + esc(p.employee_number) : ""}</small></div><div><span class="v66-pill ${esc(p.status)}">${esc(statusLabels[p.status] || p.status)}</span><small>${esc(roleLabels[p.role] || "Rôle non attribué")} · ${esc(establishmentNames.get(p.establishment_id) || "Siège non attribué")}</small></div><div class="v66-actions">${p.status === "pending" ? '<button class="v66-btn primary" data-approve>Valider</button><button class="v66-btn danger" data-reject>Refuser</button>' : '<button class="v66-btn" data-edit-account>Modifier</button>'}</div></article>`,
-            )
-            .join("")
-        : `<div class="v66-empty">${q ? "Aucun salarié ne correspond à cette recherche." : "Aucun compte."}</div>`;
+          ),pending=filtered.filter(p=>p.status==="pending"),active=filtered.filter(p=>p.status==="active"),row=p=>`<article class="v66-row v66-account-row ${p.status==="active"?"is-clickable":""}" data-id="${p.id}" ${p.status==="active"?'data-open-account tabindex="0" role="button"':''}><div><strong>${esc(fullName(p))}</strong><small>${esc(p.email)}${p.employee_number ? " · " + esc(p.employee_number) : ""}</small></div><div><span class="v66-pill ${esc(p.status)}">${esc(statusLabels[p.status] || p.status)}</span><small>${esc(roleLabels[p.role] || "Rôle non attribué")} · ${esc(establishmentNames.get(p.establishment_id) || "Siège non attribué")}</small></div><div class="v66-actions">${p.status === "pending" ? '<button class="v66-btn primary" data-approve>Valider</button><button class="v66-btn danger" data-reject>Refuser</button>' : '<span class="v66-account-open-hint">Ouvrir le profil ›</span>'}</div></article>`;
+      list.innerHTML = `<section class="v66-account-section ${pendingOnly?"highlighted":""}"><div class="v66-account-section-head"><div><h2>Demandes d’accès</h2><p>Comptes en attente d’une décision RH</p></div><strong>${data.filter(p=>p.status==="pending").length}</strong></div><div class="v66-list">${pending.length?pending.map(row).join(""):`<div class="v66-empty">${q?"Aucune demande ne correspond à cette recherche.":"Aucune demande d’accès."}</div>`}</div></section><section class="v66-account-section"><div class="v66-account-section-head"><div><h2>Comptes validés</h2><p>Comptes disposant actuellement d’un accès</p></div><strong>${data.filter(p=>p.status==="active").length}</strong></div><div class="v66-list">${active.length?active.map(row).join(""):`<div class="v66-empty">${q?"Aucun compte ne correspond à cette recherche.":"Aucun compte validé."}</div>`}</div></section>`;
       list
         .querySelectorAll("[data-approve]")
         .forEach(
@@ -379,14 +372,7 @@ async function boot(db) {
             (b.onclick = () =>
               rejectAccount(b.closest("[data-id]").dataset.id)),
         );
-      list.querySelectorAll("[data-edit-account]").forEach(
-        (b) =>
-          (b.onclick = () =>
-            editAccount(
-              data.find((x) => x.id === b.closest("[data-id]").dataset.id),
-              establishments,
-            )),
-      );
+      list.querySelectorAll("[data-open-account]").forEach(row=>{const open=()=>editAccount(data.find(x=>x.id===row.dataset.id),establishments);row.onclick=open;row.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();open()}}});
       };
       paint();
       root.querySelector("#v66AccountSearch").oninput = (event) =>
@@ -461,10 +447,11 @@ async function boot(db) {
         )
         .join(
           "",
-        )}</select></label><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Enregistrer</button></div><div class="v66-message"></div></form>`,
+        )}</select></label><div class="v66-account-danger"><strong>Accès à l’application</strong><p>Retirer l’accès bloquera ce compte tout en préservant ses anciennes données.</p><button type="button" class="v66-btn danger" data-disable-account ${account.id===profile.id?"disabled":""}>Supprimer l’accès</button>${account.id===profile.id?'<small>Tu ne peux pas supprimer ton propre accès.</small>':""}</div><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Enregistrer</button></div><div class="v66-message"></div></form>`,
     );
     document.body.appendChild(modal);
     modal.querySelector("[data-close]").onclick = () => modal.remove();
+    modal.querySelector("[data-disable-account]").onclick=async()=>{if(!confirm(`Supprimer l’accès de ${fullName(account)} ?\n\nSes données seront conservées, mais cette personne ne pourra plus utiliser l’application.`))return;const button=modal.querySelector("[data-disable-account]"),msg=modal.querySelector(".v66-message");button.disabled=true;try{const{error}=await db.rpc("disable_account_access",{target_id:account.id});if(error)throw error;modal.remove();toast("Accès du compte supprimé.");renderAccounts(shell.querySelector("#v66Content"))}catch(error){setMessage(msg,error.message,"error");button.disabled=false}};
     modal.querySelector("form").onsubmit = async (e) => {
       e.preventDefault();
       const fd = new FormData(e.currentTarget),
@@ -874,16 +861,17 @@ async function boot(db) {
         key = isoDay(d),
         holiday = holidayName(d),
         weekend = [0, 6].includes(d.getUTCDay()),
+        past = key < dateKey(new Date()),
         people = [];
       approved.forEach((r) =>
         (r.leave_periods || []).forEach((p) => {
           if (key >= p.start_date && key <= p.end_date && !weekend && !holiday)
-            people.push({name:fullName(r.profiles),type:leaveTypeLabels[p.leave_type || r.leave_type]||"Absence",duration:p.duration_type==="morning"?"Matin":p.duration_type==="afternoon"?"Après-midi":"Journée complète",establishment:r.profiles?.establishments?.name||""});
+            people.push({name:fullName(r.profiles),kind:p.leave_type || r.leave_type,type:leaveTypeLabels[p.leave_type || r.leave_type]||"Absence",duration:p.duration_type==="morning"?"Matin":p.duration_type==="afternoon"?"Après-midi":"Journée complète",establishment:r.profiles?.establishments?.name||""});
         }),
       );
-      const unavailable = weekend || holiday;
+      const unavailable = weekend || holiday || past;
       cells.push(
-        `${onSelect && !unavailable ? `<button type="button" data-leave-date="${key}" aria-label="Choisir le ${fmtDate(key)}"` : "<div"} data-absence-level="${Math.min(4,people.length)}" class="v66-cal-day ${onSelect && !unavailable ? "selectable" : ""} ${key === selectedStart ? "range-start" : ""} ${weekend ? "weekend" : ""} ${holiday ? "holiday" : ""}"><b>${day}</b>${holiday ? `<span class="v66-holiday">${esc(holiday)}</span>` : ""}${people.length?`<span class="v66-absence-count" data-absence-date="${key}">${people.length} absent${people.length>1?"s":""}</span>${people.slice(0,2).map(x=>`<span class="v66-absence v66-absence-name" data-absence-date="${key}">${esc(x.name)} · ${esc(x.type)}</span>`).join("")}${people.length>2?`<span class="v66-absence-more" data-absence-date="${key}">+ ${people.length-2} autre${people.length-2>1?"s":""}</span>`:""}`:""}${onSelect && !unavailable ? "</button>" : "</div>"}`,
+        `${onSelect && !unavailable ? `<button type="button" data-leave-date="${key}" aria-label="Choisir le ${fmtDate(key)}"` : "<div"} data-absence-level="${Math.min(4,people.length)}" class="v66-cal-day ${onSelect && !unavailable ? "selectable" : ""} ${key === selectedStart ? "range-start" : ""} ${weekend ? "weekend" : ""} ${holiday ? "holiday" : ""} ${past ? "past" : ""}"><b>${day}</b>${holiday ? `<span class="v66-holiday">${esc(holiday)}</span>` : ""}${people.length?`<span class="v66-absence-count" data-absence-date="${key}">${people.filter(x=>x.kind==="paid_leave").length} CP · ${people.filter(x=>x.kind==="rtt").length} RTT</span>${people.slice(0,2).map(x=>`<span class="v66-absence v66-absence-name ${x.kind==="rtt"?"is-rtt":"is-cp"}" data-absence-date="${key}">${esc(x.name)} · ${esc(x.type)}</span>`).join("")}${people.length>2?`<span class="v66-absence-more" data-absence-date="${key}">+ ${people.length-2} autre${people.length-2>1?"s":""}</span>`:""}`:""}${onSelect && !unavailable ? "</button>" : "</div>"}`,
       );
       if(people.length)cells[cells.length-1]=cells[cells.length-1].replace(/ class="v66-cal-day/,` data-absence-people="${esc(encodeURIComponent(JSON.stringify(people)))}" class="v66-cal-day`);
     }
@@ -899,6 +887,7 @@ async function boot(db) {
   }
 
   async function leaveRangeModal(start, end) {
+    if(start<dateKey(new Date())||end<dateKey(new Date()))return toast("Impossible de demander une absence sur une date déjà passée.");
     const dates = [];
     for (let d = new Date(start + "T12:00:00Z"), last = new Date(end + "T12:00:00Z"); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
       const key = isoDay(d);

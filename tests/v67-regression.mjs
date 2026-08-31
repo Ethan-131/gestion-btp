@@ -25,7 +25,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v78-1/.test(sw),
+  "cache PWA versionné":/antras-v79-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -47,6 +47,7 @@ const checks={
   "compteurs semaine cliquables":/data-week-filter="received"/.test(app)&&/data-week-filter="missing"/.test(app)&&/data-missing-count/.test(app),
   "semaine RH épurée":/Fiches reçues/.test(app)&&/Fiches manquantes/.test(app)&&/body\.innerHTML='<div class="v66-employee-list"><\/div>'/.test(app),
   "fiche actuelle native":/id="v66CurrentSheetPanel"/.test(app)&&/renderNativeCurrentTimesheet/.test(app)&&/v66-native-sheet/.test(app),
+  "journée type native":/Journée type/.test(app)&&/v66-template-apply/.test(app)&&/Appliquer à la semaine/.test(app)&&/index===4\?friday:hours/.test(app),
   "aucune application imbriquée":!/v66CurrentSheetPanel[^;]+<iframe/.test(app)&&!/index\.html\?embedded=1/.test(app),
   "ancien filtre retiré":!/id="v66SheetFilter"[^>]*<option/.test(app)&&/type="hidden" id="v66SheetFilter"/.test(app),
 };

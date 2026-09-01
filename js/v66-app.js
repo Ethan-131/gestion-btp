@@ -425,32 +425,16 @@ async function boot(db) {
   }
 
   function editAccount(account, establishments) {
+    const initials=`${(account.first_name||"").charAt(0)}${(account.last_name||"").charAt(0)}`.toUpperCase()||"?";
     const modal = el(
       "div",
-      { class: "v66-modal" },
-      `<form class="v66-card v66-form"><h2>Modifier le compte</h2><p class="v66-help">${esc(fullName(account))}</p><label class="v66-field">Rôle<select name="role" required>${Object.entries(
-        roleLabels,
-      )
-        .map(
-          ([id, label]) =>
-            `<option value="${id}" ${account.role === id ? "selected" : ""}>${esc(label)}</option>`,
-        )
-        .join(
-          "",
-        )}</select></label><label class="v66-field">Siège de rattachement<select name="establishment_id" required><option value="">Choisir le siège…</option>${(
-        establishments || []
-      )
-        .filter((x) => x.active)
-        .map(
-          (x) =>
-            `<option value="${x.id}" ${account.establishment_id === x.id ? "selected" : ""}>${esc(x.name)}</option>`,
-        )
-        .join(
-          "",
-        )}</select></label><div class="v66-account-danger"><strong>Accès à l’application</strong><p>Retirer l’accès bloquera ce compte tout en préservant ses anciennes données.</p><button type="button" class="v66-btn danger" data-disable-account ${account.id===profile.id?"disabled":""}>Supprimer l’accès</button>${account.id===profile.id?'<small>Tu ne peux pas supprimer ton propre accès.</small>':""}</div><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Enregistrer</button></div><div class="v66-message"></div></form>`,
+      { class: "v66-drawer-overlay" },
+      `<form class="v66-side-drawer v66-account-drawer"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(account))}</h2><small>${esc(account.email||"")}</small><span class="v66-pill active">Compte actif</span></div></div><div class="v66-drawer-tools"><button type="button" class="v66-icon-button" data-account-menu aria-label="Actions du compte">⋮</button><button type="button" class="v66-icon-button" data-close aria-label="Fermer">×</button><div class="v66-account-menu" hidden><button type="button" data-disable-account ${account.id===profile.id?"disabled":""}>Supprimer l’accès</button></div></div></header><main><section><h3>Rôle dans l’application</h3><div class="v66-choice-list">${Object.entries(roleLabels).map(([id,label])=>`<label class="v66-choice-tile"><input type="radio" name="role" value="${id}" ${account.role===id?"checked":""} required><span><b>${esc(label)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><section><h3>Siège de rattachement</h3><div class="v66-choice-list">${(establishments||[]).filter(x=>x.active).map(x=>`<label class="v66-choice-tile"><input type="radio" name="establishment_id" value="${x.id}" ${account.establishment_id===x.id?"checked":""} required><span><b>${esc(x.name)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><div class="v66-message"></div></main><footer><button class="v66-btn primary">Enregistrer les modifications</button><button type="button" class="v66-link-btn" data-close>Annuler</button></footer></form>`,
     );
     document.body.appendChild(modal);
-    modal.querySelector("[data-close]").onclick = () => modal.remove();
+    modal.querySelectorAll("[data-close]").forEach(button=>button.onclick=()=>modal.remove());
+    modal.querySelector("[data-account-menu]").onclick=()=>{const menu=modal.querySelector(".v66-account-menu");menu.hidden=!menu.hidden};
+    modal.onclick=event=>{if(event.target===modal)modal.remove()};
     modal.querySelector("[data-disable-account]").onclick=async()=>{if(!confirm(`Supprimer l’accès de ${fullName(account)} ?\n\nSes données seront conservées, mais cette personne ne pourra plus utiliser l’application.`))return;const button=modal.querySelector("[data-disable-account]"),msg=modal.querySelector(".v66-message");button.disabled=true;try{const{error}=await db.rpc("disable_account_access",{target_id:account.id});if(error)throw error;modal.remove();toast("Accès du compte supprimé.");renderAccounts(shell.querySelector("#v66Content"))}catch(error){setMessage(msg,error.message,"error");button.disabled=false}};
     modal.querySelector("form").onsubmit = async (e) => {
       e.preventDefault();
@@ -742,60 +726,22 @@ async function boot(db) {
                 )}</div>${r.employee_comment ? `<p class="v66-help">${esc(r.employee_comment)}</p>` : ""}${r.rejection_reason ? `<div class="v66-info">Motif : ${esc(r.rejection_reason)}</div>` : ""}${actions ? `<div class="v66-actions" style="margin-top:12px">${actions}</div>` : ""}</article>`;
       };
       if (canReview) {
-        list.innerHTML = `<input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié par nom ou prénom…"><div id="v66LeaveGroups"></div>`;
-        const groupsNode = list.querySelector("#v66LeaveGroups");
-        const paintGroups = (query = "") => {
-          const q = normalizeSearch(query),
-            filtered = requests.filter((r) =>
-              smartSearchMatch(fullName(r.profiles), q),
-            ),
-            groups = [
-              {
-                id: "pending",
-                title: "Demandes à traiter",
-                rows: filtered.filter((r) =>
-                  ["pending", "cancellation_requested"].includes(r.status),
-                ),
-              },
-              {
-                id: "approved",
-                title: "Demandes acceptées",
-                rows: filtered.filter((r) => r.status === "approved"),
-              },
-              {
-                id: "history",
-                title: "Historique",
-                rows: filtered.filter((r) =>
-                  ["rejected", "cancelled"].includes(r.status),
-                ),
-              },
-            ];
-          groupsNode.innerHTML = filtered.length ? groups
-            .map(
-              (g) => `<section class="v66-leave-group" data-group="${g.id}"><div class="v66-leave-group-head"><div><h3>${g.title}</h3><small>${g.rows.length} demande${g.rows.length > 1 ? "s" : ""}</small></div>${g.rows.length > 1 ? `<button type="button" class="v66-btn" data-expand>Voir toutes</button>` : ""}</div><div class="v66-list">${g.rows.length ? g.rows.map((r, i) => `<div class="${i ? "v66-leave-extra" : ""}">${cardHtml(r)}</div>`).join("") : '<div class="v66-card v66-empty">Aucune demande.</div>'}</div></section>`,
-            )
-            .join("") : '<div class="v66-card v66-empty">Aucun salarié trouvé.</div>';
-          groupsNode.querySelectorAll("[data-expand]").forEach((button) => {
-            button.onclick = () => {
-              const group = button.closest(".v66-leave-group"),
-                open = group.classList.toggle("expanded");
-              button.textContent = open ? "Réduire" : "Voir toutes";
-            };
-          });
-          bindLeaveActions();
-        };
-        list.querySelector("#v66LeaveSearch").oninput = (e) =>
-          paintGroups(e.target.value);
-        paintGroups();
-        if(routeIntent?.group==="pending"){routeIntent=null;list.querySelector('[data-group="pending"]')?.scrollIntoView({behavior:"smooth",block:"start"})}
+        let activeTab=routeIntent?.group==="pending"?"pending":"pending",query="",typeFilter="all";routeIntent=null;
+        const tabRows={pending:requests.filter(r=>["pending","cancellation_requested"].includes(r.status)),approved:requests.filter(r=>r.status==="approved"),history:requests.filter(r=>["rejected","cancelled"].includes(r.status))};
+        const requestSummary=r=>{const periods=r.leave_periods||[],cp=periods.filter(p=>(p.leave_type||r.leave_type)==="paid_leave").reduce((sum,p)=>sum+Number(p.requested_days||0),0),rtt=periods.filter(p=>(p.leave_type||r.leave_type)==="rtt").reduce((sum,p)=>sum+Number(p.requested_days||0),0),starts=periods.map(p=>p.start_date).sort(),ends=periods.map(p=>p.end_date).sort();return{cp,rtt,start:starts[0]||"",end:ends.at(-1)||"",total:cp+rtt}};
+        list.innerHTML=`<section class="v66-leave-manager"><div class="v66-leave-tabs" role="tablist"><button type="button" data-leave-tab="pending">À traiter <b>${tabRows.pending.length}</b></button><button type="button" data-leave-tab="approved">Acceptées <b>${tabRows.approved.length}</b></button><button type="button" data-leave-tab="history">Historique <b>${tabRows.history.length}</b></button></div><div class="v66-leave-toolbar"><input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié…"><select id="v66LeaveTypeFilter" aria-label="Filtrer par type"><option value="all">Toutes les demandes</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select></div><div class="v66-leave-rows" id="v66LeaveGroups"></div></section>`;
+        const groupsNode=list.querySelector("#v66LeaveGroups");
+        const openRequest=r=>{const summary=requestSummary(r),initials=`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase(),periods=(r.leave_periods||[]).sort((a,b)=>a.start_date.localeCompare(b.start_date)),pending=["pending","cancellation_requested"].includes(r.status),drawer=el("div",{class:"v66-drawer-overlay"},`<article class="v66-side-drawer v66-leave-drawer" data-id="${r.id}"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(r.profiles))}</h2><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span></div></div><button type="button" class="v66-icon-button" data-close>×</button></header><main><section class="v66-drawer-period"><h3>Période demandée</h3><strong>${summary.start===summary.end?fmtDate(summary.start):`Du ${fmtDate(summary.start)} au ${fmtDate(summary.end)}`} · ${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</strong></section><section><h3>Détail des journées</h3><div class="v66-drawer-days">${periods.map(p=>`<div><span>${p.start_date===p.end_date?fmtDate(p.start_date):`${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}`}${p.duration_type!=="full"?` · ${p.duration_type==="morning"?"Matin":"Après-midi"}`:""}</span><b class="${(p.leave_type||r.leave_type)==="rtt"?"is-rtt":"is-cp"}">${esc(leaveTypeLabels[p.leave_type||r.leave_type])}</b></div>`).join("")}</div></section><section><h3>Commentaire</h3><div class="v66-drawer-comment">${esc(r.employee_comment||"Aucun commentaire.")}</div></section>${r.rejection_reason?`<section><h3>Motif</h3><div class="v66-drawer-comment">${esc(r.rejection_reason)}</div></section>`:""}</main>${pending?`<footer>${r.status==="cancellation_requested"?'<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>':'<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>'}</footer>`:""}</article>`);document.body.appendChild(drawer);drawer.querySelector("[data-close]").onclick=()=>drawer.remove();drawer.onclick=e=>{if(e.target===drawer)drawer.remove()};bindLeaveActions(drawer)};
+        const paintGroups=()=>{const q=normalizeSearch(query),rows=tabRows[activeTab].filter(r=>smartSearchMatch(fullName(r.profiles),q)&&(typeFilter==="all"||(r.leave_periods||[]).some(p=>(p.leave_type||r.leave_type)===typeFilter)));list.querySelectorAll("[data-leave-tab]").forEach(button=>button.classList.toggle("active",button.dataset.leaveTab===activeTab));groupsNode.innerHTML=rows.length?rows.map(r=>{const s=requestSummary(r),created=new Date(r.created_at).toLocaleDateString("fr-FR");return`<button type="button" class="v66-leave-row" data-request-id="${r.id}"><span class="v66-avatar small">${esc(`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase())}</span><span class="v66-leave-row-person"><strong>${esc(fullName(r.profiles))}</strong><small>${s.start===s.end?fmtDate(s.start):`Du ${fmtDate(s.start)} au ${fmtDate(s.end)}`}</small></span><span class="v66-leave-row-types">${s.cp?`<b class="is-cp">${s.cp.toLocaleString("fr-FR")} CP</b>`:""}${s.rtt?`<b class="is-rtt">${s.rtt.toLocaleString("fr-FR")} RTT</b>`:""}</span><span class="v66-leave-row-date">Demandée le ${created}</span><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span><i>›</i></button>`}).join(""):'<div class="v66-empty">Aucune demande dans cette catégorie.</div>';groupsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)))};
+        list.querySelectorAll("[data-leave-tab]").forEach(button=>button.onclick=()=>{activeTab=button.dataset.leaveTab;paintGroups()});list.querySelector("#v66LeaveSearch").oninput=e=>{query=e.target.value;paintGroups()};list.querySelector("#v66LeaveTypeFilter").onchange=e=>{typeFilter=e.target.value;paintGroups()};paintGroups();
       } else {
         list.innerHTML = requests.length
           ? requests.map(cardHtml).join("")
           : '<div class="v66-card v66-empty">Aucune demande pour le moment.</div>';
         bindLeaveActions();
       }
-      function bindLeaveActions() {
-      list.querySelectorAll("[data-leave-decision]").forEach(
+      function bindLeaveActions(scope=list) {
+      scope.querySelectorAll("[data-leave-decision]").forEach(
         (b) =>
           (b.onclick = async () => {
             const decision = b.dataset.leaveDecision,
@@ -810,6 +756,7 @@ async function boot(db) {
                 reason,
               });
               if (error) throw error;
+              b.closest(".v66-drawer-overlay")?.remove();
               toast("Demande mise à jour.");
               await renderLeaves(root, monthOffset, calendarVisible);
             } catch (e) {
@@ -819,7 +766,7 @@ async function boot(db) {
             }
           }),
       );
-      list.querySelectorAll("[data-leave-cancel]").forEach(
+      scope.querySelectorAll("[data-leave-cancel]").forEach(
         (b) =>
           (b.onclick = () => {
             const next=b.dataset.leaveCancel,id=b.closest("[data-id]").dataset.id;

@@ -1,4 +1,4 @@
-const CACHE='antras-v86-1';
+const CACHE='antras-v87-1';
 const ASSETS=[
   './',
   './index.html',

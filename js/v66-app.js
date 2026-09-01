@@ -332,7 +332,7 @@ async function boot(db) {
 
   async function renderAccounts(root) {
     root.innerHTML =
-      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Gère les demandes d’accès et les comptes autorisés.</p></div></div><input class="v66-search" id="v66AccountSearch" placeholder="Rechercher par nom, prénom, e-mail ou matricule…"><div id="v66Accounts"><div class="v66-card v66-empty">Chargement…</div></div>';
+      '<div class="v66-pagehead"><div><h1>Comptes</h1><p>Gère les demandes d’accès et les comptes autorisés.</p></div></div><div class="v66-employee-picker v66-account-picker"><input class="v66-search" id="v66AccountSearch" placeholder="Rechercher par nom, prénom, e-mail ou matricule…" autocomplete="off"><div class="v66-employee-suggestions" id="v66AccountSuggestions" hidden></div></div><div id="v66Accounts"><div class="v66-card v66-empty">Chargement…</div></div>';
     try {
       const [{ data, error }, { data: establishments, error: estError }] =
         await Promise.all([
@@ -375,8 +375,9 @@ async function boot(db) {
       list.querySelectorAll("[data-open-account]").forEach(row=>{const open=()=>editAccount(data.find(x=>x.id===row.dataset.id),establishments);row.onclick=open;row.onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();open()}}});
       };
       paint();
-      root.querySelector("#v66AccountSearch").oninput = (event) =>
-        paint(event.target.value);
+      const accountSearch=root.querySelector("#v66AccountSearch"),accountSuggestions=root.querySelector("#v66AccountSuggestions");
+      const paintAccountSuggestions=()=>{const q=normalizeSearch(accountSearch.value);if(!q){accountSuggestions.hidden=true;accountSuggestions.innerHTML="";return}const matches=data.filter(account=>smartSearchMatch(`${account.first_name||""} ${account.last_name||""} ${account.email||""} ${account.employee_number||""}`,q));accountSuggestions.innerHTML=matches.length?matches.map(account=>`<button type="button" data-account-suggestion="${account.id}"><span class="v66-avatar small">${esc(`${(account.first_name||"").charAt(0)}${(account.last_name||"").charAt(0)}`.toUpperCase()||"?")}</span><span><strong>${esc(fullName(account)||account.email)}</strong><small>${esc(account.email||"")}${account.employee_number?` · ${esc(account.employee_number)}`:""}</small></span><span class="v66-pill ${esc(account.status)}">${esc(statusLabels[account.status]||account.status)}</span></button>`).join(""):'<div class="v66-empty">Aucun compte trouvé.</div>';accountSuggestions.hidden=false;accountSuggestions.querySelectorAll("[data-account-suggestion]").forEach(button=>button.onclick=()=>{const account=data.find(item=>item.id===button.dataset.accountSuggestion);accountSearch.value=fullName(account)||account.email;accountSuggestions.hidden=true;paint(account.email||fullName(account))})};
+      accountSearch.oninput=event=>{paint(event.target.value);paintAccountSuggestions()};accountSearch.onfocus=paintAccountSuggestions;accountSearch.onblur=()=>setTimeout(()=>{accountSuggestions.hidden=true},150);
     } catch (e) {
       root.querySelector("#v66Accounts").innerHTML =
         `<div class="v66-empty">${esc(e.message)}</div>`;
@@ -426,6 +427,7 @@ async function boot(db) {
 
   function editAccount(account, establishments) {
     const initials=`${(account.first_name||"").charAt(0)}${(account.last_name||"").charAt(0)}`.toUpperCase()||"?";
+    const accountEstablishmentNames=new Map((establishments||[]).map(site=>[site.id,site.name]));
     const modal = el(
       "div",
       { class: "v66-drawer-overlay" },
@@ -449,12 +451,10 @@ async function boot(db) {
         setMessage(msg, "Aucune modification n’a été effectuée.", "info");
         return;
       }
-      if (
-        !confirm(
-          `Voulez-vous modifier les paramètres de cet utilisateur ?\n\n${fullName(account)}`,
-        )
-      )
-        return;
+      const roleChange=nextRole!==account.role?`${roleLabels[account.role]||"Non attribué"} → ${roleLabels[nextRole]||nextRole}`:"Aucun changement";
+      const oldSite=accountEstablishmentNames.get(account.establishment_id)||"Non attribué",newSite=accountEstablishmentNames.get(nextEstablishment)||"Non attribué";
+      const confirmed=await new Promise(resolve=>{const confirmation=el("div",{class:"v66-confirm-overlay"},`<section class="v66-confirm-card"><span class="v66-confirm-icon">✓</span><h2>Confirmer les modifications</h2><p>Voulez-vous modifier les paramètres de <strong>${esc(fullName(account))}</strong> ?</p><div class="v66-confirm-changes"><div><small>Rôle</small><b>${esc(roleChange)}</b></div><div><small>Siège</small><b>${esc(nextEstablishment!==account.establishment_id?`${oldSite} → ${newSite}`:"Aucun changement")}</b></div></div><div class="v66-actions"><button type="button" class="v66-btn" data-cancel>Annuler</button><button type="button" class="v66-btn primary" data-confirm>Confirmer les modifications</button></div></section>`);document.body.appendChild(confirmation);confirmation.querySelector("[data-cancel]").onclick=()=>{confirmation.remove();resolve(false)};confirmation.querySelector("[data-confirm]").onclick=()=>{confirmation.remove();resolve(true)};confirmation.onclick=event=>{if(event.target===confirmation){confirmation.remove();resolve(false)}}});
+      if(!confirmed)return;
       try {
         const { error } = await db
           .from("profiles")
@@ -741,14 +741,16 @@ async function boot(db) {
                 )}</div>${r.employee_comment ? `<p class="v66-help">${esc(r.employee_comment)}</p>` : ""}${r.rejection_reason ? `<div class="v66-info">Motif : ${esc(r.rejection_reason)}</div>` : ""}${actions ? `<div class="v66-actions" style="margin-top:12px">${actions}</div>` : ""}</article>`;
       };
       if (canReview) {
-        let activeTab=routeIntent?.group==="pending"?"pending":"pending",query="",typeFilter="all";routeIntent=null;
+        let activeTab=routeIntent?.group==="pending"?"pending":"pending",query="",typeFilter="all",periodMonth="all",periodYear="all";routeIntent=null;
         const tabRows={pending:requests.filter(r=>["pending","cancellation_requested"].includes(r.status)),approved:requests.filter(r=>r.status==="approved"),history:requests.filter(r=>["rejected","cancelled"].includes(r.status))};
         const requestSummary=r=>{const periods=r.leave_periods||[],cp=periods.filter(p=>(p.leave_type||r.leave_type)==="paid_leave").reduce((sum,p)=>sum+Number(p.requested_days||0),0),rtt=periods.filter(p=>(p.leave_type||r.leave_type)==="rtt").reduce((sum,p)=>sum+Number(p.requested_days||0),0),starts=periods.map(p=>p.start_date).sort(),ends=periods.map(p=>p.end_date).sort();return{cp,rtt,start:starts[0]||"",end:ends.at(-1)||"",total:cp+rtt}};
-        list.innerHTML=`<section class="v66-leave-manager"><div class="v66-leave-tabs" role="tablist"><button type="button" data-leave-tab="pending">À traiter <b>${tabRows.pending.length}</b></button><button type="button" data-leave-tab="approved">Acceptées <b>${tabRows.approved.length}</b></button><button type="button" data-leave-tab="history">Historique <b>${tabRows.history.length}</b></button></div><div class="v66-leave-toolbar"><input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié…"><select id="v66LeaveTypeFilter" aria-label="Filtrer par type"><option value="all">Toutes les demandes</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select></div><div class="v66-leave-rows" id="v66LeaveGroups"></div></section>`;
+        const filterYears=Array.from({length:41},(_,index)=>new Date().getFullYear()-10+index);
+        list.innerHTML=`<section class="v66-leave-manager"><div class="v66-leave-tabs" role="tablist"><button type="button" data-leave-tab="pending">À traiter <b>${tabRows.pending.length}</b></button><button type="button" data-leave-tab="approved">Acceptées <b>${tabRows.approved.length}</b></button><button type="button" data-leave-tab="history">Historique <b>${tabRows.history.length}</b></button></div><div class="v66-leave-toolbar v66-leave-toolbar-period"><input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié…"><select id="v66LeaveTypeFilter" aria-label="Filtrer par type"><option value="all">Toutes les demandes</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select><select id="v66LeavePeriodMonth" aria-label="Filtrer par mois"><option value="all">Tous les mois</option>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select><select id="v66LeavePeriodYear" aria-label="Filtrer par année"><option value="all">Toutes les années</option>${filterYears.map(year=>`<option value="${year}">${year}</option>`).join("")}</select></div><div class="v66-leave-rows" id="v66LeaveGroups"></div></section>`;
         const groupsNode=list.querySelector("#v66LeaveGroups");
         const openRequest=r=>{const summary=requestSummary(r),initials=`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase(),periods=(r.leave_periods||[]).sort((a,b)=>a.start_date.localeCompare(b.start_date)),pending=["pending","cancellation_requested"].includes(r.status),drawer=el("div",{class:"v66-drawer-overlay"},`<article class="v66-side-drawer v66-leave-drawer" data-id="${r.id}"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(r.profiles))}</h2><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span></div></div><button type="button" class="v66-icon-button" data-close>×</button></header><main><section class="v66-drawer-period"><h3>Période demandée</h3><strong>${summary.start===summary.end?fmtDate(summary.start):`Du ${fmtDate(summary.start)} au ${fmtDate(summary.end)}`} · ${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</strong></section><section><h3>Détail des journées</h3><div class="v66-drawer-days">${periods.map(p=>`<div><span>${p.start_date===p.end_date?fmtDate(p.start_date):`${fmtDate(p.start_date)} → ${fmtDate(p.end_date)}`}${p.duration_type!=="full"?` · ${p.duration_type==="morning"?"Matin":"Après-midi"}`:""}</span><b class="${(p.leave_type||r.leave_type)==="rtt"?"is-rtt":"is-cp"}">${esc(leaveTypeLabels[p.leave_type||r.leave_type])}</b></div>`).join("")}</div></section><section><h3>Commentaire</h3><div class="v66-drawer-comment">${esc(r.employee_comment||"Aucun commentaire.")}</div></section>${r.rejection_reason?`<section><h3>Motif</h3><div class="v66-drawer-comment">${esc(r.rejection_reason)}</div></section>`:""}</main>${pending?`<footer>${r.status==="cancellation_requested"?'<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>':'<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>'}</footer>`:""}</article>`);document.body.appendChild(drawer);drawer.querySelector("[data-close]").onclick=()=>drawer.remove();drawer.onclick=e=>{if(e.target===drawer)drawer.remove()};bindLeaveActions(drawer)};
-        const paintGroups=()=>{const q=normalizeSearch(query),rows=tabRows[activeTab].filter(r=>smartSearchMatch(fullName(r.profiles),q)&&(typeFilter==="all"||(r.leave_periods||[]).some(p=>(p.leave_type||r.leave_type)===typeFilter)));list.querySelectorAll("[data-leave-tab]").forEach(button=>button.classList.toggle("active",button.dataset.leaveTab===activeTab));groupsNode.innerHTML=rows.length?rows.map(r=>{const s=requestSummary(r),created=new Date(r.created_at).toLocaleDateString("fr-FR");return`<button type="button" class="v66-leave-row" data-request-id="${r.id}"><span class="v66-avatar small">${esc(`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase())}</span><span class="v66-leave-row-person"><strong>${esc(fullName(r.profiles))}</strong><small>${s.start===s.end?fmtDate(s.start):`Du ${fmtDate(s.start)} au ${fmtDate(s.end)}`}</small></span><span class="v66-leave-row-types">${s.cp?`<b class="is-cp">${s.cp.toLocaleString("fr-FR")} CP</b>`:""}${s.rtt?`<b class="is-rtt">${s.rtt.toLocaleString("fr-FR")} RTT</b>`:""}</span><span class="v66-leave-row-date">Demandée le ${created}</span><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span><i>›</i></button>`}).join(""):'<div class="v66-empty">Aucune demande dans cette catégorie.</div>';groupsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)))};
-        list.querySelectorAll("[data-leave-tab]").forEach(button=>button.onclick=()=>{activeTab=button.dataset.leaveTab;paintGroups()});list.querySelector("#v66LeaveSearch").oninput=e=>{query=e.target.value;paintGroups()};list.querySelector("#v66LeaveTypeFilter").onchange=e=>{typeFilter=e.target.value;paintGroups()};paintGroups();
+        const overlapsSelectedPeriod=r=>{if(periodMonth==="all"&&periodYear==="all")return true;const periods=r.leave_periods||[];return periods.some(period=>{const start=new Date(`${period.start_date}T12:00:00`),end=new Date(`${period.end_date}T12:00:00`);if(periodYear!=="all"&&periodMonth==="all")return start.getFullYear()<=Number(periodYear)&&end.getFullYear()>=Number(periodYear);if(periodYear==="all"){const cursor=new Date(start.getFullYear(),start.getMonth(),1,12),last=new Date(end.getFullYear(),end.getMonth(),1,12);while(cursor<=last){if(cursor.getMonth()===Number(periodMonth))return true;cursor.setMonth(cursor.getMonth()+1)}return false}const rangeStart=new Date(Number(periodYear),Number(periodMonth),1,12),rangeEnd=new Date(Number(periodYear),Number(periodMonth)+1,0,12);return start<=rangeEnd&&end>=rangeStart})};
+        const paintGroups=()=>{const q=normalizeSearch(query),rows=tabRows[activeTab].filter(r=>smartSearchMatch(fullName(r.profiles),q)&&(typeFilter==="all"||(r.leave_periods||[]).some(p=>(p.leave_type||r.leave_type)===typeFilter))&&overlapsSelectedPeriod(r));list.querySelectorAll("[data-leave-tab]").forEach(button=>button.classList.toggle("active",button.dataset.leaveTab===activeTab));groupsNode.innerHTML=rows.length?rows.map(r=>{const s=requestSummary(r),created=new Date(r.created_at).toLocaleDateString("fr-FR");return`<button type="button" class="v66-leave-row" data-request-id="${r.id}"><span class="v66-avatar small">${esc(`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase())}</span><span class="v66-leave-row-person"><strong>${esc(fullName(r.profiles))}</strong><small>${s.start===s.end?fmtDate(s.start):`Du ${fmtDate(s.start)} au ${fmtDate(s.end)}`}</small></span><span class="v66-leave-row-types">${s.cp?`<b class="is-cp">${s.cp.toLocaleString("fr-FR")} CP</b>`:""}${s.rtt?`<b class="is-rtt">${s.rtt.toLocaleString("fr-FR")} RTT</b>`:""}</span><span class="v66-leave-row-date">Demandée le ${created}</span><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span><i>›</i></button>`}).join(""):'<div class="v66-empty">Aucune demande pour cette période.</div>';groupsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)))};
+        list.querySelectorAll("[data-leave-tab]").forEach(button=>button.onclick=()=>{activeTab=button.dataset.leaveTab;paintGroups()});list.querySelector("#v66LeaveSearch").oninput=e=>{query=e.target.value;paintGroups()};list.querySelector("#v66LeaveTypeFilter").onchange=e=>{typeFilter=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodMonth").onchange=e=>{periodMonth=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodYear").onchange=e=>{periodYear=e.target.value;paintGroups()};paintGroups();
       } else {
         list.innerHTML = requests.length
           ? requests.map(cardHtml).join("")
@@ -1027,10 +1029,10 @@ async function boot(db) {
   function renderProjectHub(root) {
     const role=visibleRole(), intent=routeIntent, requested=intent?.projectTab;
     let active=requested||"projects";routeIntent=null;
-    if(active==="it-settings"&&!['rh','admin'].includes(role))active="projects";
-    root.innerHTML=`<div class="v66-pagehead"><div><h1>Chantiers</h1><p>Gestion, avancement et paramètres associés dans une seule rubrique.</p></div></div><div class="v66-subnav"><button data-project-tab="projects">Gestion des chantiers</button><button data-project-tab="stats">Avancement</button>${['rh','admin'].includes(role)?'<button data-project-tab="it-settings">Paramètres IT</button>':''}</div><section id="v66ProjectContent"></section>`;
+    if(!["projects","stats"].includes(active))active="projects";
+    root.innerHTML=`<div class="v66-pagehead"><div><h1>Chantiers</h1><p>Créez, organisez et suivez l’avancement de vos chantiers.</p></div></div><div class="v66-subnav"><button data-project-tab="projects">Gestion des chantiers</button><button data-project-tab="stats">Statistiques chantiers</button></div><section id="v66ProjectContent"></section>`;
     const content=root.querySelector("#v66ProjectContent");
-    const show=(tab)=>{active=tab;root.querySelectorAll("[data-project-tab]").forEach(b=>b.classList.toggle("active",b.dataset.projectTab===tab));if(tab==="stats"){routeIntent=intent?.projectId?{projectId:intent.projectId}:null;renderStats(content)}else if(tab==="it-settings")renderItSettings(content);else renderProjects(content)};
+    const show=(tab)=>{active=tab;root.querySelectorAll("[data-project-tab]").forEach(b=>b.classList.toggle("active",b.dataset.projectTab===tab));if(tab==="stats"){routeIntent=intent?.projectId?{projectId:intent.projectId}:null;renderStats(content)}else renderProjects(content)};
     root.querySelectorAll("[data-project-tab]").forEach(b=>b.onclick=()=>show(b.dataset.projectTab));show(active);
   }
 
@@ -1368,15 +1370,9 @@ async function boot(db) {
       fail(e);
       return;
     }
-    const assigned = new Set(
-      (project?.project_conductors || []).map((x) => x.conductor_id),
-    );
-    const statuses =
-      role === "conducteur"
-        ? ["upcoming", "active", "overdue", "completed"]
-        : ["upcoming", "active", "overdue", "completed", "archived"];
+    const assigned = new Set((project?.project_conductors || []).map((x) => x.conductor_id));
     const assignmentField = canAssign
-      ? `<label class="v66-field">Conducteurs affectés<div class="v66-checkboxes">${conductors.length ? conductors.map((c) => `<label><input type="checkbox" name="conductors" value="${c.id}" ${assigned.has(c.id) ? "checked" : ""}> ${esc(fullName(c))}</label>`).join("") : '<span class="v66-help">Aucun conducteur actif.</span>'}</div></label>`
+      ? `<section><div class="v66-project-section-title"><span>4</span><div><h3>Conducteur de travaux</h3><p>Cette affectation est facultative.</p></div></div><div class="v66-choice-list"><label class="v66-choice-tile"><input type="radio" name="conductors" value="" ${assigned.size?"":"checked"}><span><b>Aucun conducteur pour le moment</b><i aria-hidden="true"></i></span></label>${conductors.map((c) => `<label class="v66-choice-tile"><input type="radio" name="conductors" value="${c.id}" ${assigned.has(c.id)?"checked":""}><span><b>${esc(fullName(c))}</b><small>${esc(c.email||"")}</small><i aria-hidden="true"></i></span></label>`).join("")||'<div class="v66-empty">Aucun conducteur actif.</div>'}</div></section>`
       : '<div class="v66-info">Tu seras automatiquement affecté au chantier que tu crées.</div>';
     const currentIt = new Map(
       (project?.project_it_zones || []).map((x) => [
@@ -1384,14 +1380,14 @@ async function boot(db) {
         x.it_zone_id,
       ]),
     );
-    const itFields = `<div class="v66-section"><h3>Zones IT selon le siège</h3><div class="v66-grid">${establishments.map((site) => `<label class="v66-field">${esc(site.name)}<select name="it_${site.id}"><option value="">Zone non renseignée</option>${zones.map((z) => `<option value="${z.id}" ${currentIt.get(site.id) === z.id ? "selected" : ""}>${esc(z.label)}</option>`).join("")}</select></label>`).join("")}</div></div>`;
+    const itFields = `<section><div class="v66-project-section-title"><span>3</span><div><h3>Zones IT selon le siège</h3><p>Sélectionnez la zone correspondant à chaque établissement.</p></div></div><div class="v66-project-it-grid">${establishments.map((site) => `<label class="v66-field">${esc(site.name)}<select name="it_${site.id}"><option value="">Zone non renseignée</option>${zones.map((z) => `<option value="${z.id}" ${currentIt.get(site.id) === z.id ? "selected" : ""}>${esc(z.label)}</option>`).join("")}</select></label>`).join("")}</div></section>`;
     const modal = el(
       "div",
-      { class: "v66-modal" },
-      `<form class="v66-card v66-form"><h2>${project ? "Modifier" : "Créer"} un chantier</h2><div class="v66-grid"><label class="v66-field">Code chantier<input name="code" value="${esc(project?.code || "")}" required maxlength="30"></label><label class="v66-field">Nom du chantier<input name="name" value="${esc(project?.name || "")}" required></label><label class="v66-field">Jours prévus<input name="planned_days" type="number" min="0.01" step="0.01" value="${esc(project?.planned_days || "")}" required></label><label class="v66-field">Statut<select name="status">${statuses.map((s) => `<option value="${s}" ${project?.status === s ? "selected" : ""}>${esc(statusLabels[s])}</option>`).join("")}</select></label><label class="v66-field">Début prévu<input name="planned_start_date" type="date" value="${esc(project?.planned_start_date || "")}" required></label><label class="v66-field">Fin prévue<input name="planned_end_date" type="date" value="${esc(project?.planned_end_date || "")}" required></label><label class="v66-field">Début réel (facultatif)<input name="actual_start_date" type="date" value="${esc(project?.actual_start_date || "")}"></label><label class="v66-field">Fin réelle (facultatif)<input name="actual_end_date" type="date" value="${esc(project?.actual_end_date || "")}"></label></div>${itFields}${assignmentField}<label class="v66-field">Notes internes<textarea name="internal_notes">${esc(project?.internal_notes || "")}</textarea></label><p class="v66-help">Conversion temporaire : 1 jour prévu = 7,8 h. Le nombre de jours saisi reste conservé séparément.</p><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Enregistrer</button></div><div class="v66-message"></div></form>`,
+      { class: "v66-drawer-overlay" },
+      `<form class="v66-side-drawer v66-project-drawer"><header><div><small>${project?"GESTION DU CHANTIER":"NOUVEAU CHANTIER"}</small><h2>${project?"Modifier le chantier":"Créer un chantier"}</h2><p>Renseignez uniquement les informations nécessaires.</p></div><button type="button" class="v66-icon-button" data-close aria-label="Fermer">×</button></header><main><section><div class="v66-project-section-title"><span>1</span><div><h3>Informations du chantier</h3><p>Le code et le nom permettront de retrouver rapidement le chantier.</p></div></div><div class="v66-project-identity-grid"><label class="v66-field">Code chantier<input name="code" value="${esc(project?.code||"")}" required maxlength="30" placeholder="Ex. 12 34 567"></label><label class="v66-field">Nom du chantier<input name="name" value="${esc(project?.name||"")}" required placeholder="Nom ou adresse du chantier"></label></div></section><section><div class="v66-project-section-title"><span>2</span><div><h3>Période prévisionnelle</h3><p>Le statut sera calculé automatiquement à partir de ces dates.</p></div></div><div class="v66-project-date-grid"><label class="v66-field">Date de début prévue<input name="planned_start_date" type="date" value="${esc(project?.planned_start_date||"")}" required></label><div class="v66-project-date-arrow">→</div><label class="v66-field">Date de fin prévue<input name="planned_end_date" type="date" value="${esc(project?.planned_end_date||"")}" required></label></div></section>${itFields}${assignmentField}<div class="v66-message"></div></main><footer><button class="v66-btn primary">${project?"Enregistrer les modifications":"Créer le chantier"}</button><button type="button" class="v66-link-btn" data-close>Annuler</button></footer></form>`,
     );
     document.body.appendChild(modal);
-    modal.querySelector("[data-close]").onclick = () => modal.remove();
+    modal.querySelectorAll("[data-close]").forEach(button=>button.onclick=()=>modal.remove());modal.onclick=event=>{if(event.target===modal)modal.remove()};
     modal.querySelector("form").onsubmit = async (e) => {
       e.preventDefault();
       const form = e.currentTarget,
@@ -1407,16 +1403,15 @@ async function boot(db) {
         );
         return;
       }
+      const workDays=(()=>{let count=0,cursor=new Date(`${start}T12:00:00`),last=new Date(`${end}T12:00:00`);while(cursor<=last){const day=cursor.getDay();if(day!==0&&day!==6)count++;cursor.setDate(cursor.getDate()+1)}return Math.max(count,1)})();
+      const today=dateKey(new Date()),automaticStatus=end<today?"completed":start>today?"upcoming":"active";
       const values = {
         code: fd.get("code").trim(),
         name: fd.get("name").trim(),
-        planned_days: Number(fd.get("planned_days")),
-        status: fd.get("status"),
+        planned_days: workDays,
+        status: automaticStatus,
         planned_start_date: start,
         planned_end_date: end,
-        actual_start_date: fd.get("actual_start_date") || null,
-        actual_end_date: fd.get("actual_end_date") || null,
-        internal_notes: fd.get("internal_notes").trim(),
         updated_by: profile.id,
       };
       try {
@@ -1455,7 +1450,7 @@ async function boot(db) {
           if (error) throw error;
         }
         if (canAssign) {
-          const selected = fd.getAll("conductors");
+          const selected = fd.get("conductors")?[fd.get("conductors")]:[];
           const { error: delError } = await db
             .from("project_conductors")
             .delete()
@@ -1474,7 +1469,7 @@ async function boot(db) {
         }
         modal.remove();
         toast("Chantier et zones IT enregistrés.");
-        renderProjects(shell.querySelector("#v66Content"));
+        renderProjectHub(shell.querySelector("#v66Content"));
       } catch (err) {
         setMessage(msg, err.message, "error");
       }

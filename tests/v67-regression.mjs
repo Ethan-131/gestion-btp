@@ -29,7 +29,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v87-1/.test(sw),
+  "cache PWA versionné":/antras-v89-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -70,6 +70,8 @@ const checks={
   "panneau latéral comptes":/v66-account-drawer/.test(app)&&/v66-choice-tile/.test(app)&&/Enregistrer les modifications/.test(app)&&/v66DrawerIn/.test(css),
   "onglets demandes congés":/data-leave-tab="pending"/.test(app)&&/data-leave-tab="approved"/.test(app)&&/data-leave-tab="history"/.test(app)&&/v66-leave-manager/.test(css),
   "panneau détail congé":/v66-leave-drawer/.test(app)&&/Détail des journées/.test(app)&&/v66-drawer-days/.test(css),
+  "panneaux latéraux larges":/width:max\(560px,34vw\)/.test(css),
+  "confirmation modification compte":/Voulez-vous modifier les paramètres de cet utilisateur/.test(app)&&/Aucune modification n’a été effectuée/.test(app),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

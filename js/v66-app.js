@@ -440,12 +440,27 @@ async function boot(db) {
       e.preventDefault();
       const fd = new FormData(e.currentTarget),
         msg = e.currentTarget.querySelector(".v66-message");
+      const nextRole = fd.get("role"),
+        nextEstablishment = fd.get("establishment_id");
+      if (
+        nextRole === account.role &&
+        nextEstablishment === account.establishment_id
+      ) {
+        setMessage(msg, "Aucune modification n’a été effectuée.", "info");
+        return;
+      }
+      if (
+        !confirm(
+          `Voulez-vous modifier les paramètres de cet utilisateur ?\n\n${fullName(account)}`,
+        )
+      )
+        return;
       try {
         const { error } = await db
           .from("profiles")
           .update({
-            role: fd.get("role"),
-            establishment_id: fd.get("establishment_id"),
+            role: nextRole,
+            establishment_id: nextEstablishment,
           })
           .eq("id", account.id);
         if (error) throw error;

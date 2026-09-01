@@ -29,7 +29,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v93-1/.test(sw),
+  "cache PWA versionné":/antras-v94-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -80,6 +80,13 @@ const checks={
   "confirmation compte Antras":/v66-confirm-overlay/.test(app)&&/Confirmer les modifications/.test(app)&&/roleChange/.test(app)&&/v66-confirm-card/.test(css),
   "chantiers sans paramètres IT":!/data-project-tab="it-settings"/.test(app)&&/Statistiques chantiers/.test(app),
   "formulaire chantier simplifié":/v66-project-drawer/.test(app)&&/Période prévisionnelle/.test(app)&&/automaticStatus/.test(app)&&/Cette affectation est facultative/.test(app)&&!/name="planned_days"/.test(app)&&!/name="actual_start_date"/.test(app),
+  "catégories gestion chantiers":/v66ProjectCategoryTabs/.test(app)&&/projectTimeCategory/.test(app)&&/projectCategoryLabels/.test(app)&&/v66-project-category-tabs/.test(css),
+  "catégories statistiques chantiers":/v66StatsCategoryTabs/.test(app)&&/data-stats-category/.test(app),
+  "statistiques salariés chantier":/employeesByProject/.test(app)&&/data-more-workers/.test(app)&&/Voir les autres salariés/.test(app)&&/v66-project-workers/.test(css),
+  "progression temporelle chantier":/Temps prévisionnel écoulé/.test(app)&&/timePct/.test(app)&&/v66-time-progress/.test(css),
+  "années jusqu’en 2100":/Array\.from\(\{length:81\},\(_,index\)=>2020\+index\)/.test(app)&&/Array\.from\(\{length:81\},\(_,i\)=>2020\+i\)/.test(app),
+  "retour période congés actuelle":/v66LeaveCurrentPeriod/.test(app)&&/Période actuelle/.test(app),
+  "grand calendrier chantier":/v66-project-calendar-dialog/.test(css)&&/data-open-project-calendar/.test(app)&&/Valider la période/.test(app)&&/data-calendar-date/.test(app),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

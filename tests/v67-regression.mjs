@@ -29,7 +29,7 @@ const checks={
   "suppression synchro manuelle":!/Synchroniser maintenant/.test(app),
   "confirmation partager":/Enregistrer la fiche d’heures et la partager avec le bureau/.test(legacy),
   "recherche comptes":/v66AccountSearch/.test(app),
-  "cache PWA versionné":/antras-v90-1/.test(sw),
+  "cache PWA versionné":/antras-v91-1/.test(sw),
   "session sans double rendu":/authReady/.test(app)&&/_event === "INITIAL_SESSION"/.test(app)&&/_event === "TOKEN_REFRESHED"/.test(app),
   "accueil contextuel":/Comptes en attente/.test(app)&&/Chantiers en cours/.test(app)&&/Continuer ma fiche/.test(app),
   "recherche intelligente":/function smartSearchMatch/.test(app)&&/Aucun salarié trouvé/.test(app),
@@ -73,6 +73,8 @@ const checks={
   "panneaux latéraux larges":/width:max\(560px,34vw\)/.test(css),
   "confirmation modification compte":/Voulez-vous modifier les paramètres de cet utilisateur/.test(app)&&/Aucune modification n’a été effectuée/.test(app),
   "recherche intelligente fiches salariés":/matchFilter&&smartSearchMatch\([\s\S]*?r\.first_name[\s\S]*?r\.last_name[\s\S]*?r\.email/.test(app),
+  "sélecteur salarié avec suggestions":/v66EmployeeSuggestions/.test(app)&&/paintSuggestions/.test(app)&&/data-employee-id/.test(app)&&/v66-employee-suggestions/.test(css),
+  "archives individuelles salarié":/showEmployeeArchive/.test(app)&&/Fiches enregistrées de/.test(app)&&/Voir tous les salariés/.test(app)&&/v66-employee-sheet-archive/.test(css),
 };
 for(const [name,ok] of Object.entries(checks))assert.equal(ok,true,`Échec : ${name}`);
 

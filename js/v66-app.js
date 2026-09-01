@@ -1174,7 +1174,10 @@ async function boot(db) {
         const filtered=rows.filter(r=>{
           const status=r.absent_full_week?"absent":!r.timesheet_id?"missing":warningMap.has(r.timesheet_id)?"warning":"received";
           const matchFilter=f==="all"||(f==="received"&&!!r.timesheet_id)||f===status;
-          return matchFilter&&normalizeSearch(`${r.first_name||""} ${r.last_name||""}`).includes(q);
+          return matchFilter&&smartSearchMatch(
+            `${r.first_name||""} ${r.last_name||""} ${r.email||""}`,
+            q,
+          );
         });
         list.innerHTML=filtered.map(r=>{const warning=warningMap.get(r.timesheet_id),status=r.absent_full_week?"Dispensé — absence validée":!r.timesheet_id?"À recevoir":warning?"⚠ Fiche à vérifier":"Transmise";return `<button type="button" class="v66-employee ${warning?"v66-has-warning":""}" ${r.timesheet_id?`data-sheet-id="${r.timesheet_id}"`:"disabled"}><span><strong>${esc(`${r.first_name||""} ${r.last_name||""}`.trim()||r.email)}${warning?' <b class="v66-warning-star" aria-label="Fiche à vérifier">*</b>':''}</strong><small>${warning?esc(warning.join(" · ")):"Touchez pour ouvrir la fiche complète"}</small></span><span class="v66-pill ${warning?"warning":esc(r.sheet_status||"")}">${esc(status)}</span></button>`}).join("")||'<div class="v66-empty">Aucun résultat.</div>';
         list.querySelectorAll("[data-sheet-id]").forEach(b=>{b.onclick=()=>openTimesheetDetail(b.dataset.sheetId,canReview);b.ondblclick=b.onclick});

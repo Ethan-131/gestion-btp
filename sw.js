@@ -1,4 +1,4 @@
-const CACHE='antras-v105-1';
+const CACHE='antras-v106-1';
 const ASSETS=[
   './',
   './index.html',
@@ -11,6 +11,7 @@ const ASSETS=[
   './js/supabase-config.js',
   './js/v66-app.js',
   './js/v105-personal-project-stats.js',
+  './js/v106-preview-stats.js',
   './js/v96-project-catalog.js',
   './js/project-catalog.js'
 ];

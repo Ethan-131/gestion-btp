@@ -67,7 +67,6 @@ create trigger profiles_sync_legacy_role_v2
 before insert or update of business_role on public.profiles
 for each row execute function public.sync_legacy_role_from_business_role();
 
--- Resynchronisation immédiate de tous les profils.
 update public.profiles set business_role = business_role;
 
 -- 3) Helpers de permissions V2.
@@ -120,12 +119,10 @@ as $$
   ), false)
 $$;
 
--- Compatibilité avec toutes les RPC/policies existantes.
 create or replace function public.is_rh_or_admin()
 returns boolean language sql stable security definer set search_path = public
 as $$ select public.is_v2_management() $$;
 
--- `is_rh()` reste la permission de validation fonctionnelle : Direction + Patron + Admin.
 create or replace function public.is_rh()
 returns boolean language sql stable security definer set search_path = public
 as $$ select public.is_v2_management() $$;
@@ -150,9 +147,6 @@ create policy profiles_v2_account_managers_update
 on public.profiles for update
 using (public.can_manage_accounts_v2())
 with check (public.can_manage_accounts_v2());
-
--- Un utilisateur garde le droit de modifier ses propres informations via les RPC dédiées,
--- mais pas de changer son rôle par un UPDATE direct.
 
 -- 5) RPC dédiée pour attribuer un rôle métier avec protections.
 create or replace function public.set_business_role_v2(target_id uuid, new_role text)
@@ -179,14 +173,12 @@ begin
 
   if target_role is null then raise exception 'Compte introuvable'; end if;
 
-  -- Seul l'administrateur technique peut créer/retirer un administrateur ou un patron.
   if actor_role <> 'admin' and (
     new_role in ('admin','patron') or target_role in ('admin','patron')
   ) then
     raise exception 'Seul l Administrateur technique peut gérer les rôles Administrateur et Patron';
   end if;
 
-  -- Empêche l'administrateur de se retirer lui-même son dernier accès critique par erreur.
   if target_id = auth.uid() and target_role = 'admin' and new_role <> 'admin' then
     if (select count(*) from public.profiles where status='active' and business_role='admin') <= 1 then
       raise exception 'Impossible de retirer le dernier Administrateur technique actif';
@@ -295,26 +287,43 @@ left join public.projects p on p.id = s.project_id;
 grant select on public.v2_project_time_entries to authenticated;
 
 -- 8) Vue synthèse destinée aux tableaux de bord.
+-- Les heures sont agrégées par chantier, mais repas/alertes sont calculés une seule fois par journée.
 create or replace view public.v2_timesheet_week_summary
 with (security_invoker = true)
 as
+with hours_by_sheet as (
+  select t.id as timesheet_id, coalesce(sum(s.hours),0)::numeric(10,2) as total_hours
+  from public.timesheets t
+  left join public.timesheet_days d on d.timesheet_id=t.id
+  left join public.timesheet_sites s on s.day_id=d.id
+  group by t.id
+),
+days_by_sheet as (
+  select t.id as timesheet_id,
+         coalesce(sum(d.meal),0)::numeric(10,2) as total_meals,
+         coalesce(sum(d.travel_km),0)::numeric(10,2) as total_travel_km,
+         bool_or(coalesce(d.it_needs_review,false)) as has_it_warning
+  from public.timesheets t
+  left join public.timesheet_days d on d.timesheet_id=t.id
+  group by t.id
+)
 select
   t.id,
   t.employee_id,
   t.iso_year,
   t.iso_week,
   t.status,
-  coalesce(sum(s.hours),0)::numeric(10,2) as total_hours,
-  coalesce(sum(distinct case when d.meal > 0 then d.meal else 0 end),0)::numeric(10,2) as meals_indicator,
-  bool_or(coalesce(d.it_needs_review,false)) as has_it_warning
+  coalesce(h.total_hours,0)::numeric(10,2) as total_hours,
+  coalesce(d.total_meals,0)::numeric(10,2) as total_meals,
+  coalesce(d.total_travel_km,0)::numeric(10,2) as total_travel_km,
+  coalesce(d.has_it_warning,false) as has_it_warning
 from public.timesheets t
-left join public.timesheet_days d on d.timesheet_id=t.id
-left join public.timesheet_sites s on s.day_id=d.id
-group by t.id,t.employee_id,t.iso_year,t.iso_week,t.status;
+left join hours_by_sheet h on h.timesheet_id=t.id
+left join days_by_sheet d on d.timesheet_id=t.id;
 
 grant select on public.v2_timesheet_week_summary to authenticated;
 
 commit;
 
--- Après exécution, vous pouvez attribuer le premier Administrateur technique ainsi :
+-- Après exécution, attribuez le premier Administrateur technique, puis rechargez l'application :
 -- update public.profiles set business_role='admin' where email='VOTRE_EMAIL';

@@ -252,7 +252,7 @@ async function boot(db) {
   function appScreen() {
     const pages = allowedPages();
     if (["review","team"].includes(currentPage)) { routeIntent={...(routeIntent||{}),employeeSheets:true};currentPage = "legacy"; }
-    if (["stats", "it-settings"].includes(currentPage)) {
+    if (["stats"].includes(currentPage)) {
       routeIntent = { ...(routeIntent || {}), projectTab: currentPage };
       currentPage = "projects";
     }
@@ -394,7 +394,7 @@ async function boot(db) {
     const modal = el(
       "div",
       { class: "v66-modal" },
-      `<form class="v66-card v66-form"><h2>Valider le compte</h2><label class="v66-field">Rôle<select name="role" required><option value="salarie">Salarié</option><option value="conducteur">Conducteur de travaux</option><option value="rh">RH / Direction</option><option value="admin">Administrateur technique</option></select></label><label class="v66-field">Siège de rattachement<select name="establishment_id" required><option value="">Choisir le siège…</option>${(establishments || []).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><p class="v66-help">Le siège détermine automatiquement la zone IT appliquée pour chaque chantier.</p><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Confirmer</button></div><div class="v66-message"></div></form>`,
+      `<form class="v66-card v66-form"><h2>Valider le compte</h2><label class="v66-field">Rôle<select name="role" required><option value="salarie">Salarié</option><option value="conducteur">Conducteur de travaux</option><option value="rh">RH / Direction</option><option value="admin">Administrateur technique</option></select></label><label class="v66-field">Siège de rattachement<select name="establishment_id" required><option value="">Choisir le siège…</option>${(establishments || []).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><p class="v66-help">Le siège de rattachement reste utilisé pour l’organisation des comptes. Les IT sont désormais définies directement en kilomètres sur chaque chantier.</p><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Confirmer</button></div><div class="v66-message"></div></form>`,
     );
     document.body.appendChild(modal);
     modal.querySelector("[data-close]").onclick = () => modal.remove();
@@ -1049,12 +1049,12 @@ async function boot(db) {
     const role = visibleRole();
     root.innerHTML = `<div class="v66-pagehead v66-project-list-head"><div><p>Codes, dates prévisionnelles et conducteurs affectés.</p></div><div class="v66-actions">${["rh","admin"].includes(role)?'<button class="v66-btn" id="v66ImportProjects">Importer la liste entreprise</button>':''}<button class="v66-btn primary" id="v66NewProject">Nouveau chantier</button></div></div>${role === "conducteur" ? '<div class="v66-info">Tu peux créer un chantier et modifier ceux auxquels tu es affecté. L’archivage et les affectations restent gérés par les RH.</div>' : ""}<div class="v66-project-category-tabs" id="v66ProjectCategoryTabs"></div><input class="v66-search" id="v66ProjectSearch" placeholder="Rechercher par code ou nom…"><div class="v66-list" id="v66Projects" style="margin-top:12px"><div class="v66-card v66-empty">Chargement…</div></div>`;
     root.querySelector("#v66NewProject").onclick = () => projectModal();
-    root.querySelector("#v66ImportProjects")?.addEventListener("click",async event=>{const button=event.currentTarget,catalog=window.ANTRAS_CURRENT_PROJECTS||[];if(!catalog.length)return toast("La liste entreprise est introuvable.");button.disabled=true;button.textContent="Import en cours…";try{const{data,error}=await db.rpc("import_project_catalog",{catalog});if(error)throw error;const unresolved=data?.unresolved?.length||0;toast(`${data?.inserted||0} chantier(s) créé(s), ${data?.updated||0} actualisé(s).${unresolved?` ${unresolved} conducteur(s) à identifier.`:""}`);renderProjects(root)}catch(error){setMessage(root.querySelector("#v66Projects"),`${error.message} — Exécutez le fichier Supabase V96 avant l’import.`,"error");button.disabled=false;button.textContent="Importer la liste entreprise"}});
+    root.querySelector("#v66ImportProjects")?.addEventListener("click",async event=>{const button=event.currentTarget,catalog=window.ANTRAS_CURRENT_PROJECTS||[];if(!catalog.length)return toast("La liste entreprise est introuvable.");button.disabled=true;button.textContent="Import en cours…";try{const{data,error}=await db.rpc("import_project_catalog",{catalog});if(error)throw error;const unresolved=data?.unresolved?.length||0;toast(`${data?.inserted||0} chantier(s) créé(s), ${data?.updated||0} actualisé(s).${unresolved?` ${unresolved} conducteur(s) à identifier.`:""}`);renderProjects(root)}catch(error){setMessage(root.querySelector("#v66Projects"),`${error.message} — Exécutez les migrations Supabase nécessaires avant l’import.`,"error");button.disabled=false;button.textContent="Importer la liste entreprise"}});
     try {
       const { data, error } = await db
         .from("projects")
         .select(
-          "*,project_conductors(conductor_id,profiles!project_conductors_conductor_id_fkey(first_name,last_name)),project_it_zones(establishment_id,it_zone_id,it_zones(label),establishments(name))",
+          "*,project_conductors(conductor_id,profiles!project_conductors_conductor_id_fkey(first_name,last_name))",
         )
         .order("code");
       if (error) throw error;
@@ -1072,7 +1072,7 @@ async function boot(db) {
                   canEdit =
                     ["rh", "admin"].includes(role) ||
                     (role === "conducteur" && assigned);
-                const category=projectTimeCategory(p);return `<article class="v66-card v66-row" data-id="${p.id}"><div><strong>${esc(p.code)} — ${esc(p.name)}</strong><small>${fmtDate(p.planned_start_date)} → ${fmtDate(p.planned_end_date)} · ${esc(p.planned_days)} jours / ${esc(p.planned_hours)} h</small></div><div><span class="v66-pill ${category}">${projectCategoryLabels[category]}</span><small>${p.project_conductors?.length ? esc(p.project_conductors.map((x) => fullName(x.profiles)).join(", ")) : "Aucun conducteur"}</small></div><div class="v66-actions">${canEdit ? '<button class="v66-btn" data-edit>Modifier</button>' : '<span class="v66-help">Consultation</span>'}</div></article>`;
+                const category=projectTimeCategory(p);return `<article class="v66-card v66-row" data-id="${p.id}"><div><strong>${esc(p.code)} — ${esc(p.name)}</strong><small>${fmtDate(p.planned_start_date)} → ${fmtDate(p.planned_end_date)} · ${esc(p.planned_days)} jours / ${esc(p.planned_hours)} h · IT ${Number(p.it_km||0).toLocaleString("fr-FR")} km</small></div><div><span class="v66-pill ${category}">${projectCategoryLabels[category]}</span><small>${p.project_conductors?.length ? esc(p.project_conductors.map((x) => fullName(x.profiles)).join(", ")) : "Aucun conducteur"}</small></div><div class="v66-actions">${canEdit ? '<button class="v66-btn" data-edit>Modifier</button>' : '<span class="v66-help">Consultation</span>'}</div></article>`;
               })
               .join("")
           : '<div class="v66-card v66-empty">Aucun chantier trouvé.</div>';
@@ -1209,21 +1209,18 @@ async function boot(db) {
   function smartSearchMatch(value,query){const q=normalizeSearch(query);if(!q)return true;const words=normalizeSearch(value).split(" ").filter(Boolean);return q.split(" ").filter(Boolean).every(token=>words.some(word=>word.includes(token)||token.includes(word)||(token.length>=5&&editDistanceAtMostOne(word,token))))}
   function timesheetWarnings(sheet){const days=sheet?.timesheet_days||[],reasons=[];let total=0;days.forEach(d=>{const hours=(d.timesheet_sites||[]).reduce((n,s)=>n+Number(s.hours||0),0);total+=hours;const weekday=new Date(`${d.work_date}T12:00:00`).getDay();if(hours>12)reasons.push(`Plus de 12 h le ${fmtDate(d.work_date)}`);if(hours>0&&(weekday===0||weekday===6))reasons.push(`Travail le week-end (${fmtDate(d.work_date)})`);if(d.it_needs_review)reasons.push(`IT à vérifier le ${fmtDate(d.work_date)}`);if((d.timesheet_sites||[]).some(s=>!s.project_id))reasons.push(`Chantier non référencé le ${fmtDate(d.work_date)}`)});if(total>55)reasons.push(`Total inhabituel : ${total.toLocaleString("fr-FR")} h`);return [...new Set(reasons)]}
   function officialTimesheetMarkup(s){
-    const days=[...(s.timesheet_days||[])].sort((a,b)=>a.work_date.localeCompare(b.work_date)),worked=days.filter(d=>(d.day_type||"worked")==="worked"),totalHours=worked.reduce((n,d)=>n+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),totalMeals=worked.reduce((n,d)=>n+Number(d.meal||0),0),itDays=worked.filter(d=>d.it_zone_label_snapshot),counts={cp:days.filter(d=>d.day_type==="cp").length,rtt:days.filter(d=>d.day_type==="rtt").length,holiday:days.filter(d=>d.day_type==="holiday").length},dayNames=["DIMANCHE","LUNDI","MARDI","MERCREDI","JEUDI","VENDREDI","SAMEDI"],code=value=>{const raw=String(value||"").trim(),digits=raw.replace(/\D/g,"");if(!digits)return esc(raw||"—");const groups=[digits.slice(0,2),digits.slice(2,4),digits.slice(4,7)].filter(Boolean);return esc(groups.join("\n"))};
-    const rows=days.map(d=>{const date=new Date(`${d.work_date}T12:00:00`),type=d.day_type||"worked",label=type==="cp"?"CONGÉ PAYÉ":type==="rtt"?"RTT":type==="holiday"?"FÉRIÉ":"";if(type!=="worked")return `<div class="v66-ro-day v66-ro-absence"><div class="v66-ro-date"><strong>${dayNames[date.getDay()]}</strong><span>${fmtDate(d.work_date)}</span></div><div class="v66-ro-absence-mark">${label}</div></div>`;const sites=d.timesheet_sites||[],codes=sites.map(x=>code(x.project_code_snapshot)).join("<br>"),names=sites.map(x=>esc(x.project_name_snapshot||"—")).join("<br>"),hours=sites.map(x=>esc(String(Number(x.hours||0)).replace(".",","))).join("<br>"),tasks=esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"—");return `<div class="v66-ro-day"><div class="v66-ro-date"><strong>${dayNames[date.getDay()]}</strong><span>${fmtDate(d.work_date)}</span></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center v66-ro-code">${codes||"—"}</div></div><div class="v66-ro-cell v66-ro-project"><div class="v66-ro-value">${names||"—"}</div><div class="v66-ro-sub">Sous total</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${hours||"—"}</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${Number(d.meal||0)}</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${esc(d.it_zone_label_snapshot||"Non renseignée")}</div></div><div class="v66-ro-cell v66-ro-tasks"><div class="v66-ro-value">${tasks}</div><div class="v66-ro-vehicle">Véhicule : <span>—</span></div></div></div>`}).join("");
+    const days=[...(s.timesheet_days||[])].sort((a,b)=>a.work_date.localeCompare(b.work_date)),worked=days.filter(d=>(d.day_type||"worked")==="worked"),totalHours=worked.reduce((n,d)=>n+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),totalMeals=worked.reduce((n,d)=>n+Number(d.meal||0),0),itDays=worked.filter(d=>Number(d.travel_km)>0),counts={cp:days.filter(d=>d.day_type==="cp").length,rtt:days.filter(d=>d.day_type==="rtt").length,holiday:days.filter(d=>d.day_type==="holiday").length},dayNames=["DIMANCHE","LUNDI","MARDI","MERCREDI","JEUDI","VENDREDI","SAMEDI"],code=value=>{const raw=String(value||"").trim(),digits=raw.replace(/\D/g,"");if(!digits)return esc(raw||"—");const groups=[digits.slice(0,2),digits.slice(2,4),digits.slice(4,7)].filter(Boolean);return esc(groups.join("\n"))};
+    const rows=days.map(d=>{const date=new Date(`${d.work_date}T12:00:00`),type=d.day_type||"worked",label=type==="cp"?"CONGÉ PAYÉ":type==="rtt"?"RTT":type==="holiday"?"FÉRIÉ":"";if(type!=="worked")return `<div class="v66-ro-day v66-ro-absence"><div class="v66-ro-date"><strong>${dayNames[date.getDay()]}</strong><span>${fmtDate(d.work_date)}</span></div><div class="v66-ro-absence-mark">${label}</div></div>`;const sites=d.timesheet_sites||[],codes=sites.map(x=>code(x.project_code_snapshot)).join("<br>"),names=sites.map(x=>esc(x.project_name_snapshot||"—")).join("<br>"),hours=sites.map(x=>esc(String(Number(x.hours||0)).replace(".",","))).join("<br>"),tasks=esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", ")||"—");return `<div class="v66-ro-day"><div class="v66-ro-date"><strong>${dayNames[date.getDay()]}</strong><span>${fmtDate(d.work_date)}</span></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center v66-ro-code">${codes||"—"}</div></div><div class="v66-ro-cell v66-ro-project"><div class="v66-ro-value">${names||"—"}</div><div class="v66-ro-sub">Sous total</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${hours||"—"}</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${Number(d.meal||0)}</div></div><div class="v66-ro-cell"><div class="v66-ro-value v66-ro-center">${Number(d.travel_km)>0?`${Number(d.travel_km).toLocaleString("fr-FR")} km`:"0 km"}</div></div><div class="v66-ro-cell v66-ro-tasks"><div class="v66-ro-value">${tasks}</div><div class="v66-ro-vehicle">Véhicule : <span>—</span></div></div></div>`}).join("");
     const recap=[`${worked.length} jour${worked.length>1?"s":""} travaillé${worked.length>1?"s":""}`,counts.cp?`${counts.cp} jour${counts.cp>1?"s":""} de congé payé`:"",counts.rtt?`${counts.rtt} jour${counts.rtt>1?"s":""} de RTT`:"",counts.holiday?`${counts.holiday} jour${counts.holiday>1?"s":""} férié${counts.holiday>1?"s":""}`:"",`${String(totalHours).replace(".",",")} heures effectuées`,`${totalMeals} repas`].filter(Boolean);
-    return `<div class="v66-official-paper"><div class="v66-ro-report"><img src="antras-logo.png" alt="">RAPPORT HEBDOMADAIRE - ANTRAS OSSATURE BOIS</div><div class="v66-ro-identity"><div>NOM : <strong>${esc(s.profiles?.last_name||"")}</strong></div><div>Prénom : <strong>${esc(s.profiles?.first_name||"")}</strong></div><div>Semaine n° <strong>${s.iso_week}</strong></div></div><div class="v66-ro-head"><div>JOUR / DATE</div><div>Code</div><div>CHANTIER</div><div>Heures</div><div>Repas</div><div>IT</div><div>TÂCHES EFFECTUÉES</div></div>${rows}<div class="v66-ro-observations"><strong>Observations :</strong><span>${esc(s.observations||"—")}</span><div><small>TOTAL H</small><b>${String(totalHours).replace(".",",")}</b></div><div><small>REPAS</small><b>${totalMeals}</b></div><div><small>JOURS IT</small><b>${itDays.length}</b></div></div><div class="v66-ro-recap"><strong>Compte rendu :</strong><span>${esc(recap.join(" · "))}</span><small><b>IT :</b> ${itDays.length?esc(itDays.map(d=>`${fmtDate(d.work_date)} : ${d.it_zone_label_snapshot}`).join(" · ")):"Aucune IT"}</small></div><div class="v66-ro-footer"><img src="antras-logo.png" alt=""> ANTRAS OSSATURE BOIS · Fiche d’heures enregistrée</div></div>`
+    return `<div class="v66-official-paper"><div class="v66-ro-report"><img src="antras-logo.png" alt="">RAPPORT HEBDOMADAIRE - ANTRAS OSSATURE BOIS</div><div class="v66-ro-identity"><div>NOM : <strong>${esc(s.profiles?.last_name||"")}</strong></div><div>Prénom : <strong>${esc(s.profiles?.first_name||"")}</strong></div><div>Semaine n° <strong>${s.iso_week}</strong></div></div><div class="v66-ro-head"><div>JOUR / DATE</div><div>Code</div><div>CHANTIER</div><div>Heures</div><div>Repas</div><div>IT</div><div>TÂCHES EFFECTUÉES</div></div>${rows}<div class="v66-ro-observations"><strong>Observations :</strong><span>${esc(s.observations||"—")}</span><div><small>TOTAL H</small><b>${String(totalHours).replace(".",",")}</b></div><div><small>REPAS</small><b>${totalMeals}</b></div><div><small>JOURS IT</small><b>${itDays.length}</b></div></div><div class="v66-ro-recap"><strong>Compte rendu :</strong><span>${esc(recap.join(" · "))}</span><small><b>IT :</b> ${itDays.length?esc(itDays.map(d=>`${fmtDate(d.work_date)} : ${Number(d.travel_km).toLocaleString("fr-FR")} km`).join(" · ")):"Aucune IT"}</small></div><div class="v66-ro-footer"><img src="antras-logo.png" alt=""> ANTRAS OSSATURE BOIS · Fiche d’heures enregistrée</div></div>`
   }
   function fitOfficialSheet(modal){const viewport=modal.querySelector(".v66-official-viewport"),paper=modal.querySelector(".v66-official-paper");if(!viewport||!paper)return;const fit=()=>{const scale=Math.min(1,(viewport.clientWidth-4)/980);paper.style.transform=`scale(${scale})`;viewport.style.height=`${paper.scrollHeight*scale+4}px`};fit();if(window.ResizeObserver)new ResizeObserver(fit).observe(viewport)}
 
   async function openTimesheetDetail(id, canReview) {
     const modal=el("div",{class:"v66-modal"},'<div class="v66-card"><div class="v66-empty">Chargement de la fiche…</div></div>');document.body.appendChild(modal);
     try{
-      const [{data:s,error},{data:zones,error:ze}]=await Promise.all([
-        db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,day_type,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single(),
-        canReview?db.from("it_zones").select("id,label").eq("active",true).order("label"):Promise.resolve({data:[],error:null})
-      ]);if(error)throw error;if(ze)throw ze;
-      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),warnings=timesheetWarnings(s),editable=canReview&&visibleRole()==="rh",editRows=(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>(d.timesheet_sites||[]).map((x,i)=>`<div class="v66-sheet-row"><span><strong>${i?"":fmtDate(d.work_date)}</strong></span><span>${esc(x.project_code_snapshot||"—")} — ${esc(x.project_name_snapshot||"Chantier non renseigné")}</span><span><input class="v66-inline-input" type="number" min="0" max="24" step="0.5" value="${Number(x.hours||0)}" data-site-hours="${x.id}"></span><span>${i?"":`<input class="v66-inline-input" type="number" min="0" max="1" step="1" value="${Number(d.meal||0)}" data-day-meal="${d.id}">`}</span><span>${i?"":esc(d.it_zone_label_snapshot||"Non renseignée")}</span><span>${i?"":`<input class="v66-inline-input" value="${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", "))}" data-day-task="${d.id}">`}</span></div>`).join("")).join("");
+      const {data:s,error}=await db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,day_type,meal,travel_km,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single();if(error)throw error;
+      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),warnings=timesheetWarnings(s),editable=canReview&&visibleRole()==="rh",editRows=(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>(d.timesheet_sites||[]).map((x,i)=>`<div class="v66-sheet-row"><span><strong>${i?"":fmtDate(d.work_date)}</strong></span><span>${esc(x.project_code_snapshot||"—")} — ${esc(x.project_name_snapshot||"Chantier non renseigné")}</span><span><input class="v66-inline-input" type="number" min="0" max="24" step="0.5" value="${Number(x.hours||0)}" data-site-hours="${x.id}"></span><span>${i?"":`<input class="v66-inline-input" type="number" min="0" max="1" step="1" value="${Number(d.meal||0)}" data-day-meal="${d.id}">`}</span><span>${i?"":`${Number(d.travel_km||0).toLocaleString("fr-FR")} km`}</span><span>${i?"":`<input class="v66-inline-input" value="${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", "))}" data-day-task="${d.id}">`}</span></div>`).join("")).join("");
       modal.classList.add("v66-official-modal");modal.innerHTML=`<article class="v66-card v66-sheet-detail" data-id="${s.id}"><div class="v66-pagehead"><div><h2>Fiche d’heures — ${esc(fullName(s.profiles))}</h2><p>${weekTitle(s.iso_year,s.iso_week)} · ${hours.toLocaleString("fr-FR")} h · ${esc(sheetLabels[s.status]||"Transmise")}</p></div><button class="v66-btn" data-close>Fermer</button></div>${warnings.length?`<div class="v66-sheet-warning"><strong>⚠ Fiche à vérifier</strong><ul>${warnings.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:""}<div class="v66-official-viewport">${officialTimesheetMarkup(s)}</div>${editable?`<details class="v66-edit-sheet"><summary>Modifier cette fiche</summary><div class="v66-full-sheet"><div class="v66-sheet-row v66-sheet-heading"><span>Date</span><span>Chantier</span><span>Heures</span><span>Repas</span><span>IT</span><span>Tâches</span></div>${editRows}</div><label class="v66-field v66-sheet-note">Observations<textarea data-sheet-observations>${esc(s.observations||"")}</textarea></label><div class="v66-actions"><button class="v66-btn primary" data-save-sheet>Enregistrer les modifications RH</button></div></details>`:""}</article>`;fitOfficialSheet(modal);
       modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.onclick=e=>{if(e.target===modal)modal.remove()};
       modal.querySelector("[data-save-sheet]")?.addEventListener("click",async e=>{const button=e.currentTarget;button.disabled=true;try{for(const input of modal.querySelectorAll("[data-site-hours]")){const{error}=await db.from("timesheet_sites").update({hours:Number(input.value)}).eq("id",input.dataset.siteHours);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-meal]")){const{error}=await db.from("timesheet_days").update({meal:Number(input.value)}).eq("id",input.dataset.dayMeal);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-task]")){const{error}=await db.from("timesheet_days").update({manual_task:input.value.trim()}).eq("id",input.dataset.dayTask);if(error)throw error}const{error}=await db.from("timesheets").update({observations:modal.querySelector("[data-sheet-observations]").value}).eq("id",id);if(error)throw error;toast("Modifications RH enregistrées.");modal.remove();appScreen()}catch(err){fail(err);button.disabled=false}});
@@ -1234,14 +1231,6 @@ async function boot(db) {
     const role = visibleRole();
     root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Validations RH" : role === "admin" ? "Toutes les fiches" : "Fiches de mes chantiers"}</h1><p>${canReview ? "Fiches envoyées, modifiées, validées ou refusées." : role === "admin" ? "Accès technique à toutes les données." : "Lecture seule : identité, heures, repas, IT et tâches."}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
     try {
-      const { data: zones, error: zonesError } = canReview
-        ? await db
-            .from("it_zones")
-            .select("id,label")
-            .eq("active", true)
-            .order("label")
-        : { data: [], error: null };
-      if (zonesError) throw zonesError;
       let query = db
         .from("timesheets")
         .select(
@@ -1274,20 +1263,15 @@ async function boot(db) {
                 ),
                 meals = days.reduce((a, d) => a + Number(d.meal || 0), 0),
                 itDays = days.filter(
-                  (d) => d.it_zone_label_snapshot || Number(d.travel_km) > 0,
+                  (d) => Number(d.travel_km) > 0,
                 ).length;
               return `<article class="v66-card" data-id="${s.id}"><div class="v66-pagehead"><div><strong>${esc(fullName(s.profiles))} · Semaine ${s.iso_week}/${s.iso_year}</strong><p>Version ${s.version}</p></div><span class="v66-pill ${esc(s.status)}">${esc({ pending_review: "En attente de décision", changed_after_validation: "Modifiée — à revalider", validated: "Validée", rejected: "Refusée" }[s.status] || s.status)}</span></div><div class="v66-stats"><div class="v66-stat"><small>Heures</small><strong>${hours.toLocaleString("fr-FR")} h</strong></div><div class="v66-stat"><small>Repas</small><strong>${meals.toLocaleString("fr-FR")}</strong></div><div class="v66-stat"><small>Jours IT</small><strong>${itDays}</strong></div></div><div class="v66-list">${days
                 .sort((a, b) => a.work_date.localeCompare(b.work_date))
                 .map((d) => {
-                  const legacy =
-                      !d.it_zone_label_snapshot && Number(d.travel_km) > 0,
-                    zone =
-                      d.it_zone_label_snapshot ||
-                      (legacy ? "Ancienne IT" : "Zone IT non renseignée");
-                  const chooser =
-                    canReview && d.it_needs_review
-                      ? `<label class="v66-field">IT à décider<select data-it-review data-day-id="${d.id}"><option value="">Choisir une zone…</option>${zones.map((z) => `<option value="${z.id}" data-label="${esc(z.label)}">${esc(z.label)}</option>`).join("")}</select></label>`
-                      : `<small>IT : ${esc(zone)}</small>`;
+                  const km = Number(d.travel_km || 0),
+                    chooser = canReview && d.it_needs_review
+                      ? `<label class="v66-field">IT à décider<input data-it-review data-day-id="${d.id}" type="number" min="0" max="1000" step="1" value="${km || ""}" placeholder="Kilomètres"></label>`
+                      : `<small>IT : ${km.toLocaleString("fr-FR")} km</small>`;
                   return `<div class="v66-row ${d.it_needs_review ? "it-warning" : ""}"><div><strong>${fmtDate(d.work_date)}</strong><small>${(d.timesheet_sites || []).map((x) => `${esc(x.project_code_snapshot)} ${esc(x.project_name_snapshot)} — ${Number(x.hours || 0).toLocaleString("fr-FR")} h`).join("<br>") || "Aucun chantier"}</small></div><div><small>Repas : ${esc(d.meal)}</small>${chooser}<small>${esc([...(d.tasks || []), d.manual_task].filter(Boolean).join(", ") || "Aucune tâche")}</small></div></div>`;
                 })
                 .join(
@@ -1297,27 +1281,20 @@ async function boot(db) {
             .join("")
         : '<div class="v66-card v66-empty">Aucune fiche disponible.</div>';
       box.querySelectorAll("[data-it-review]").forEach(
-        (select) =>
-          (select.onchange = async () => {
-            if (!select.value) return;
-            const option = select.selectedOptions[0];
-            select.disabled = true;
+        (input) =>
+          (input.onchange = async () => {
+            const km = Number(input.value);
+            if (!Number.isFinite(km) || km < 0) return;
+            input.disabled = true;
             try {
               const { error } = await db
                 .from("timesheet_days")
-                .update({
-                  it_zone_id: select.value,
-                  it_zone_label_snapshot: option.dataset.label,
-                  it_needs_review: false,
-                })
-                .eq("id", select.dataset.dayId);
+                .update({ travel_km: km, it_zone_id: null, it_zone_label_snapshot: null, it_needs_review: false })
+                .eq("id", input.dataset.dayId);
               if (error) throw error;
-              toast("Zone IT appliquée à cette journée.");
+              toast("Kilométrage IT appliqué à cette journée.");
               await renderSharedSheets(root, canReview);
-            } catch (e) {
-              fail(e);
-              select.disabled = false;
-            }
+            } catch (e) { fail(e); input.disabled = false; }
           }),
       );
       box.querySelectorAll("[data-decision]").forEach(
@@ -1357,25 +1334,16 @@ async function boot(db) {
       canAssign = ["rh", "admin"].includes(role);
     let conductors = [];
     try {
-      const requests = [
-        db.from("establishments").select("*").eq("active", true).order("name"),
-        db.from("it_zones").select("*").eq("active", true).order("label"),
-      ];
-      if (canAssign)
-        requests.push(
-          db
-            .from("profiles")
-            .select("id,first_name,last_name,email")
-            .eq("status", "active")
-            .eq("role", "conducteur")
-            .order("last_name"),
-        );
-      const results = await Promise.all(requests);
-      if (results.some((x) => x.error))
-        throw results.find((x) => x.error).error;
-      var establishments = results[0].data || [],
-        zones = results[1].data || [];
-      if (canAssign) conductors = results[2].data || [];
+      if (canAssign) {
+        const { data, error } = await db
+          .from("profiles")
+          .select("id,first_name,last_name,email")
+          .eq("status", "active")
+          .eq("role", "conducteur")
+          .order("last_name");
+        if (error) throw error;
+        conductors = data || [];
+      }
     } catch (e) {
       fail(e);
       return;
@@ -1384,13 +1352,7 @@ async function boot(db) {
     const assignmentField = canAssign
       ? `<section><div class="v66-project-section-title"><span>4</span><div><h3>Conducteur de travaux</h3><p>Cette affectation est facultative.</p></div></div><div class="v66-choice-list"><label class="v66-choice-tile"><input type="radio" name="conductors" value="" ${assigned.size?"":"checked"}><span><b>Aucun conducteur pour le moment</b><i aria-hidden="true"></i></span></label>${conductors.map((c) => `<label class="v66-choice-tile"><input type="radio" name="conductors" value="${c.id}" ${assigned.has(c.id)?"checked":""}><span><b>${esc(fullName(c))}</b><small>${esc(c.email||"")}</small><i aria-hidden="true"></i></span></label>`).join("")||'<div class="v66-empty">Aucun conducteur actif.</div>'}</div></section>`
       : '<div class="v66-info">Tu seras automatiquement affecté au chantier que tu crées.</div>';
-    const currentIt = new Map(
-      (project?.project_it_zones || []).map((x) => [
-        x.establishment_id,
-        x.it_zone_id,
-      ]),
-    );
-    const itFields = `<section><div class="v66-project-section-title"><span>3</span><div><h3>Zones IT selon le siège</h3><p>Sélectionnez la zone correspondant à chaque établissement.</p></div></div><div class="v66-project-it-grid">${establishments.map((site) => `<label class="v66-field">${esc(site.name)}<select name="it_${site.id}"><option value="">Zone non renseignée</option>${zones.map((z) => `<option value="${z.id}" ${currentIt.get(site.id) === z.id ? "selected" : ""}>${esc(z.label)}</option>`).join("")}</select></label>`).join("")}</div></section>`;
+    const itFields = `<section><div class="v66-project-section-title"><span>3</span><div><h3>IT du chantier</h3><p>Indiquez le nombre de kilomètres attribué à ce chantier. Il sera repris automatiquement dans les fiches d’heures.</p></div></div><div class="v66-project-it-grid"><label class="v66-field">Kilomètres IT<input name="it_km" type="number" min="0" max="1000" step="1" inputmode="numeric" value="${esc(String(project?.it_km??""))}" required placeholder="Ex. 60"></label></div></section>`;
     const modal = el(
       "div",
       { class: "v66-drawer-overlay" },
@@ -1400,7 +1362,7 @@ async function boot(db) {
     modal.querySelectorAll("[data-close]").forEach(button=>button.onclick=()=>modal.remove());modal.onclick=event=>{if(event.target===modal)modal.remove()};
     const startInput=modal.querySelector('[name="planned_start_date"]'),endInput=modal.querySelector('[name="planned_end_date"]'),periodLabel=modal.querySelector("[data-project-period-label]");
     const refreshPeriodLabel=()=>{periodLabel.textContent=startInput.value&&endInput.value?`Du ${fmtDate(startInput.value)} au ${fmtDate(endInput.value)}`:startInput.value?`Début le ${fmtDate(startInput.value)} · choisissez la fin`:"Aucune période sélectionnée"};startInput.onchange=refreshPeriodLabel;endInput.onchange=refreshPeriodLabel;
-    if(project&&canAssign){const footer=modal.querySelector("footer");footer.insertAdjacentHTML("afterbegin",'<button type="button" class="v66-btn danger v66-delete-project" data-delete-project>Supprimer le chantier</button>');footer.querySelector("[data-delete-project]").onclick=async()=>{const confirmBox=el("div",{class:"v66-confirm-overlay"},`<section class="v66-confirm-dialog v66-danger-confirm"><span class="v66-confirm-icon">!</span><h2>Supprimer ce chantier ?</h2><div class="v66-confirm-project"><strong>${esc(project.code)} — ${esc(project.name)}</strong><small>Les anciennes fiches d’heures seront conservées, mais le chantier disparaîtra des listes.</small></div><p>Cette action est définitive.</p><div class="v66-actions"><button type="button" class="v66-btn" data-cancel>Annuler</button><button type="button" class="v66-btn danger" data-confirm>Supprimer définitivement</button></div></section>`);document.body.appendChild(confirmBox);const accepted=await new Promise(resolve=>{confirmBox.querySelector("[data-cancel]").onclick=()=>resolve(false);confirmBox.querySelector("[data-confirm]").onclick=()=>resolve(true)});confirmBox.remove();if(!accepted)return;try{const{error}=await db.rpc("delete_project_safely",{target_id:project.id});if(error)throw error;modal.remove();toast("Chantier supprimé. Les anciennes fiches sont conservées.");renderProjectHub(shell.querySelector("#v66Content"))}catch(error){setMessage(modal.querySelector(".v66-message"),`${error.message} — Exécutez le fichier Supabase V96 si nécessaire.`,"error")}}}
+    if(project&&canAssign){const footer=modal.querySelector("footer");footer.insertAdjacentHTML("afterbegin",'<button type="button" class="v66-btn danger v66-delete-project" data-delete-project>Supprimer le chantier</button>');footer.querySelector("[data-delete-project]").onclick=async()=>{const confirmBox=el("div",{class:"v66-confirm-overlay"},`<section class="v66-confirm-dialog v66-danger-confirm"><span class="v66-confirm-icon">!</span><h2>Supprimer ce chantier ?</h2><div class="v66-confirm-project"><strong>${esc(project.code)} — ${esc(project.name)}</strong><small>Les anciennes fiches d’heures seront conservées, mais le chantier disparaîtra des listes.</small></div><p>Cette action est définitive.</p><div class="v66-actions"><button type="button" class="v66-btn" data-cancel>Annuler</button><button type="button" class="v66-btn danger" data-confirm>Supprimer définitivement</button></div></section>`);document.body.appendChild(confirmBox);const accepted=await new Promise(resolve=>{confirmBox.querySelector("[data-cancel]").onclick=()=>resolve(false);confirmBox.querySelector("[data-confirm]").onclick=()=>resolve(true)});confirmBox.remove();if(!accepted)return;try{const{error}=await db.rpc("delete_project_safely",{target_id:project.id});if(error)throw error;modal.remove();toast("Chantier supprimé. Les anciennes fiches sont conservées.");renderProjectHub(shell.querySelector("#v66Content"))}catch(error){setMessage(modal.querySelector(".v66-message"),`${error.message} — Exécutez le fichier Supabase V98 si nécessaire.`,"error")}}}
     modal.querySelector("[data-open-project-calendar]").onclick=()=>{let selectedStart=startInput.value||"",selectedEnd=endInput.value||"",view=selectedStart?new Date(`${selectedStart}T12:00:00`):new Date();const calendar=el("div",{class:"v66-confirm-overlay v66-project-calendar-overlay"},`<section class="v66-project-calendar-dialog"><header><div><small>PÉRIODE PRÉVISIONNELLE</small><h2>Choisir les dates du chantier</h2><p>Premier clic : début · second clic : fin</p></div><button type="button" class="v66-icon-button" data-calendar-close>×</button></header><div class="v66-project-calendar-controls"><button type="button" class="v66-btn" data-calendar-prev>‹</button><select data-calendar-month>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select><select data-calendar-year>${Array.from({length:81},(_,index)=>2020+index).map(year=>`<option value="${year}">${year}</option>`).join("")}</select><button type="button" class="v66-btn" data-calendar-next>›</button><button type="button" class="v66-btn" data-calendar-today>Aujourd’hui</button></div><div class="v66-project-calendar-weekdays">${["Lun","Mar","Mer","Jeu","Ven","Sam","Dim"].map(day=>`<span>${day}</span>`).join("")}</div><div class="v66-project-calendar-grid" data-calendar-grid></div><div class="v66-project-calendar-summary" data-calendar-summary></div><footer><button type="button" class="v66-btn" data-calendar-reset>Effacer</button><button type="button" class="v66-btn primary" data-calendar-apply disabled>Valider la période</button></footer></section>`);document.body.appendChild(calendar);const grid=calendar.querySelector("[data-calendar-grid]"),monthSelect=calendar.querySelector("[data-calendar-month]"),yearSelect=calendar.querySelector("[data-calendar-year]"),summary=calendar.querySelector("[data-calendar-summary]"),apply=calendar.querySelector("[data-calendar-apply]");const renderCalendar=()=>{monthSelect.value=String(view.getMonth());yearSelect.value=String(view.getFullYear());const first=new Date(view.getFullYear(),view.getMonth(),1,12),offset=(first.getDay()+6)%7,lastDay=new Date(view.getFullYear(),view.getMonth()+1,0,12).getDate(),cells=[];for(let i=0;i<offset;i++)cells.push('<span class="empty"></span>');for(let day=1;day<=lastDay;day++){const date=new Date(view.getFullYear(),view.getMonth(),day,12),key=`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`,inRange=selectedStart&&selectedEnd&&key>=selectedStart&&key<=selectedEnd;cells.push(`<button type="button" data-calendar-date="${key}" class="${key===selectedStart?"start ":""}${key===selectedEnd?"end ":""}${inRange?"in-range":""}">${day}</button>`)}grid.innerHTML=cells.join("");summary.innerHTML=selectedStart?selectedEnd?`<strong>Du ${fmtDate(selectedStart)} au ${fmtDate(selectedEnd)}</strong>`:`<strong>Début : ${fmtDate(selectedStart)}</strong><small>Sélectionnez maintenant la date de fin.</small>`:'<small>Sélectionnez la date de début du chantier.</small>';apply.disabled=!(selectedStart&&selectedEnd);grid.querySelectorAll("[data-calendar-date]").forEach(button=>button.onclick=()=>{const key=button.dataset.calendarDate;if(!selectedStart||selectedEnd){selectedStart=key;selectedEnd=""}else if(key<selectedStart){selectedEnd=selectedStart;selectedStart=key}else selectedEnd=key;renderCalendar()})};calendar.querySelector("[data-calendar-close]").onclick=()=>calendar.remove();calendar.querySelector("[data-calendar-prev]").onclick=()=>{view.setMonth(view.getMonth()-1);renderCalendar()};calendar.querySelector("[data-calendar-next]").onclick=()=>{view.setMonth(view.getMonth()+1);renderCalendar()};calendar.querySelector("[data-calendar-today]").onclick=()=>{view=new Date();renderCalendar()};monthSelect.onchange=()=>{view=new Date(Number(yearSelect.value),Number(monthSelect.value),1,12);renderCalendar()};yearSelect.onchange=monthSelect.onchange;calendar.querySelector("[data-calendar-reset]").onclick=()=>{selectedStart="";selectedEnd="";renderCalendar()};apply.onclick=()=>{startInput.value=selectedStart;endInput.value=selectedEnd;periodLabel.textContent=`Du ${fmtDate(selectedStart)} au ${fmtDate(selectedEnd)}`;calendar.remove()};renderCalendar()};
     modal.querySelector("form").onsubmit = async (e) => {
       e.preventDefault();
@@ -1427,9 +1389,42 @@ async function boot(db) {
         status: automaticStatus,
         planned_start_date: start,
         planned_end_date: end,
+        it_km: Math.max(0, Number(fd.get("it_km") || 0)),
         updated_by: profile.id,
       };
       try {
+        // V98 — Empêche la création (ou le renommage) d'un chantier avec un code déjà utilisé.
+        // On normalise le code afin que "12 34 567", "12-34-567" et "1234567"
+        // soient considérés comme le même chantier.
+        const normalizeProjectCode = (value) =>
+          String(value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+        const normalizedCode = normalizeProjectCode(values.code);
+        if (!normalizedCode) {
+          setMessage(msg, "Renseignez un code chantier valide.", "error");
+          form.querySelector('[name="code"]')?.focus();
+          return;
+        }
+        const { data: existingProjects, error: duplicateCheckError } = await db
+          .from("projects")
+          .select("id,code,name");
+        if (duplicateCheckError) throw duplicateCheckError;
+        const duplicate = (existingProjects || []).find((item) =>
+          item.id !== project?.id &&
+          normalizeProjectCode(item.code) === normalizedCode,
+        );
+        if (duplicate) {
+          setMessage(
+            msg,
+            `Impossible de créer ce chantier : le chantier ${duplicate.code} — ${duplicate.name} existe déjà.`,
+            "error",
+          );
+          form.querySelector('[name="code"]')?.focus();
+          return;
+        }
+
         let id = project?.id;
         if (id) {
           const { error } = await db
@@ -1446,23 +1441,6 @@ async function boot(db) {
             .single();
           if (error) throw error;
           id = data.id;
-        }
-        const itRows = establishments
-          .map((site) => ({
-            project_id: id,
-            establishment_id: site.id,
-            it_zone_id: fd.get("it_" + site.id),
-            updated_by: profile.id,
-          }))
-          .filter((x) => x.it_zone_id);
-        const { error: itDeleteError } = await db
-          .from("project_it_zones")
-          .delete()
-          .eq("project_id", id);
-        if (itDeleteError) throw itDeleteError;
-        if (itRows.length) {
-          const { error } = await db.from("project_it_zones").insert(itRows);
-          if (error) throw error;
         }
         if (canAssign) {
           const selected = fd.get("conductors")?[fd.get("conductors")]:[];
@@ -1483,7 +1461,7 @@ async function boot(db) {
           }
         }
         modal.remove();
-        toast("Chantier et zones IT enregistrés.");
+        toast("Chantier enregistré. Kilométrage IT mis à jour.");
         renderProjectHub(shell.querySelector("#v66Content"));
       } catch (err) {
         setMessage(msg, err.message, "error");
@@ -1558,8 +1536,8 @@ async function boot(db) {
     let projects=[],existing=null;
     if(navigator.onLine){
       const[projectResult,sheetResult]=await Promise.all([
-        db.from("projects").select("id,code,name,status,project_it_zones(establishment_id,it_zone_id,it_zones(label))").neq("status","archived").order("code"),
-        db.from("timesheets").select("id,observations,timesheet_days(id,work_date,day_type,meal,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,vehicle,delivery_note,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours,position))").eq("employee_id",profile.id).eq("iso_year",year).eq("iso_week",week).maybeSingle()
+        db.from("projects").select("id,code,name,status,it_km").neq("status","archived").order("code"),
+        db.from("timesheets").select("id,observations,timesheet_days(id,work_date,day_type,meal,travel_km,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,vehicle,delivery_note,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours,position))").eq("employee_id",profile.id).eq("iso_year",year).eq("iso_week",week).maybeSingle()
       ]);
       if(projectResult.error)throw projectResult.error;if(sheetResult.error)throw sheetResult.error;
       projects=projectResult.data||[];existing=sheetResult.data;
@@ -1570,7 +1548,7 @@ async function boot(db) {
     const codeOptions=projects.map(p=>`<option value="${esc(p.code)}">${esc(p.name)}</option>`).join(""),nameOptions=projects.map(p=>`<option value="${esc(p.name)}">${esc(p.code)}</option>`).join("");
     const siteMarkup=(site={})=>`<div class="v66-native-site"><label>Code chantier<input class="v66-native-code" list="v66ProjectCodes" value="${esc(site.project_code_snapshot||site.code||"")}" placeholder="Code chantier"></label><label>Chantier<input class="v66-native-project" list="v66ProjectNames" value="${esc(site.project_name_snapshot||site.name||"")}" placeholder="Nom du chantier"></label><label>Heures<input class="v66-native-hours" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="${esc(site.hours??"")}"></label><button type="button" class="v66-native-remove" aria-label="Supprimer ce chantier">×</button></div>`;
     const typeChoices=(selected="worked")=>`<div class="v66-day-types" role="group" aria-label="Type de journée">${[["worked","Travaillé"],["cp","Congé payé"],["rtt","RTT"],["holiday","Férié"]].map(([value,label])=>`<button type="button" data-day-type="${value}" class="${selected===value?"active":""}">${label}</button>`).join("")}</div>`;
-    const daysMarkup=dates.map((date,index)=>{const source=localDays.get(date)||existingDays.get(date)||{},sites=source.sites||(source.timesheet_sites||[]),dayType=source.day_type||"worked";return `<section class="v66-native-day ${dayType!=="worked"?"is-absence":""}" data-date="${date}" data-type="${dayType}"><header><strong>${dayNames[index]}</strong><span>${fmtDate(date)}</span></header>${typeChoices(dayType)}<div class="v66-day-watermark">${dayType==="cp"?"CONGÉ PAYÉ":dayType==="rtt"?"RTT":dayType==="holiday"?"FÉRIÉ":""}</div><div class="v66-native-work-fields"><div class="v66-native-sites">${(sites.length?sites:[{}]).map(siteMarkup).join("")}</div><button type="button" class="v66-link-btn v66-native-add">+ Ajouter un chantier</button><div class="v66-native-day-details"><label>Repas<select class="v66-native-meal"><option value="0">0</option><option value="1" ${Number(source.meal)===1?"selected":""}>1</option></select></label><label>IT<input class="v66-native-it" value="${esc(source.it_zone_label_snapshot||source.it_zone_label||"")}" readonly placeholder="Calcul automatique"></label><label>Tâches effectuées<input class="v66-native-task" value="${esc(source.manual_task||(source.tasks||[]).join(", ")||"")}" placeholder="Travaux réalisés"></label></div><p class="v66-native-warning" hidden></p></div></section>`}).join("");
+    const daysMarkup=dates.map((date,index)=>{const source=localDays.get(date)||existingDays.get(date)||{},sites=source.sites||(source.timesheet_sites||[]),dayType=source.day_type||"worked";return `<section class="v66-native-day ${dayType!=="worked"?"is-absence":""}" data-date="${date}" data-type="${dayType}"><header><strong>${dayNames[index]}</strong><span>${fmtDate(date)}</span></header>${typeChoices(dayType)}<div class="v66-day-watermark">${dayType==="cp"?"CONGÉ PAYÉ":dayType==="rtt"?"RTT":dayType==="holiday"?"FÉRIÉ":""}</div><div class="v66-native-work-fields"><div class="v66-native-sites">${(sites.length?sites:[{}]).map(siteMarkup).join("")}</div><button type="button" class="v66-link-btn v66-native-add">+ Ajouter un chantier</button><div class="v66-native-day-details"><label>Repas<select class="v66-native-meal"><option value="0">0</option><option value="1" ${Number(source.meal)===1?"selected":""}>1</option></select></label><label>IT<input class="v66-native-it" value="${Number(source.travel_km||0)>0?esc(String(Number(source.travel_km))):""}" readonly placeholder="Calcul automatique"></label><label>Tâches effectuées<input class="v66-native-task" value="${esc(source.manual_task||(source.tasks||[]).join(", ")||"")}" placeholder="Travaux réalisés"></label></div><p class="v66-native-warning" hidden></p></div></section>`}).join("");
     const templateMarkup=`<section class="v66-day-template"><div><strong>Journée type</strong><small>Code et chantier sont obligatoires. Les tâches restent à compléter chaque jour.</small></div><div class="v66-day-template-fields"><label>Code chantier<input class="v66-template-code" list="v66ProjectCodes" placeholder="Code chantier"></label><label>Chantier<input class="v66-template-project" list="v66ProjectNames" placeholder="Nom du chantier"></label><label>Heures lun. à jeu.<input class="v66-template-hours" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="8"></label><label>Heures vendredi<input class="v66-template-friday" type="number" min="0" max="24" step="0.25" inputmode="decimal" value="7"></label><label>Repas<select class="v66-template-meal"><option value="0">0</option><option value="1" selected>1</option></select></label></div><button type="button" class="v66-btn primary v66-template-apply">Appliquer à la semaine</button></section>`;
     panel.innerHTML=`<form class="v66-native-sheet"><div class="v66-native-report"><img src="antras-logo.png" alt=""><div><strong>RAPPORT HEBDOMADAIRE</strong><small>${esc(weekTitle(year,week))}</small></div></div><div class="v66-native-identity"><span>Nom : <strong>${esc(profile.last_name||"")}</strong></span><span>Prénom : <strong>${esc(profile.first_name||"")}</strong></span></div><datalist id="v66ProjectCodes">${codeOptions}</datalist><datalist id="v66ProjectNames">${nameOptions}</datalist>${templateMarkup}${daysMarkup}<label class="v66-native-observations">Observations<textarea rows="3">${esc(local?.observations||existing?.observations||"")}</textarea></label><div class="v66-week-recap"></div><div class="v66-actions"><button class="v66-btn primary" type="submit">Enregistrer et partager la fiche</button></div><div class="v66-message"></div></form>`;
     const form=panel.querySelector("form"),normalize=v=>String(v||"").trim().toLowerCase();form.dataset.dirty="false";
@@ -1578,7 +1556,7 @@ async function boot(db) {
     form.addEventListener("change",()=>{form.dataset.dirty="true"});
     form.addEventListener("click",event=>{if(event.target.closest(".v66-template-apply,[data-day-type],.v66-native-add,.v66-native-remove"))form.dataset.dirty="true"});
     const projectFor=(code,name)=>{const c=normalize(code),n=normalize(name);return projects.find(p=>c&&n?normalize(p.code)===c&&normalize(p.name)===n:c?normalize(p.code)===c:n?normalize(p.name)===n:false)};
-    const refresh=()=>{let total=0,meals=0,worked=0,cp=0,rtt=0,holiday=0;const itList=[];form.querySelectorAll(".v66-native-day").forEach(day=>{const type=day.dataset.type||"worked",watermark=day.querySelector(".v66-day-watermark"),work=day.querySelector(".v66-native-work-fields");day.classList.toggle("is-absence",type!=="worked");watermark.textContent=type==="cp"?"CONGÉ PAYÉ":type==="rtt"?"RTT":type==="holiday"?"FÉRIÉ":"";work.querySelectorAll("input,select,button").forEach(x=>x.disabled=type!=="worked");if(type!=="worked"){if(type==="cp")cp++;if(type==="rtt")rtt++;if(type==="holiday")holiday++;return}worked++;const matches=[...day.querySelectorAll(".v66-native-site")].map(row=>projectFor(row.querySelector(".v66-native-code").value,row.querySelector(".v66-native-project").value)).filter(Boolean),unknown=[...day.querySelectorAll(".v66-native-site")].some(row=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim();return(code||name)&&(!code||!name||!projectFor(code,name))}),zones=[...new Map(matches.flatMap(p=>(p.project_it_zones||[]).filter(z=>z.establishment_id===profile.establishment_id&&z.it_zones?.label).map(z=>[z.it_zone_id,z.it_zones.label]))).values()],it=day.querySelector(".v66-native-it"),warning=day.querySelector(".v66-native-warning");it.value=zones.length===1?zones[0]:"";if(it.value)itList.push(`${day.querySelector("header strong").textContent} : ${it.value}`);warning.hidden=!(unknown||zones.length!==1&&matches.length);warning.textContent=unknown?"Attention : le code et le nom du chantier doivent être renseignés. Chantier non référencé autorisé.":zones.length>1?"Plusieurs zones IT : décision RH nécessaire.":"Zone IT non renseignée : 0 IT sera appliqué.";day.querySelectorAll(".v66-native-hours").forEach(i=>total+=Number(i.value||0));meals+=Number(day.querySelector(".v66-native-meal").value||0)});const parts=[`${worked} jour${worked>1?"s":""} travaillé${worked>1?"s":""}`];if(cp)parts.push(`${cp} jour${cp>1?"s":""} de congé payé`);if(rtt)parts.push(`${rtt} jour${rtt>1?"s":""} de RTT`);if(holiday)parts.push(`${holiday} jour${holiday>1?"s":""} férié${holiday>1?"s":""}`);form.querySelector(".v66-week-recap").innerHTML=`<strong>Compte rendu de la semaine</strong><div>${parts.map(x=>`<span>${esc(x)}</span>`).join("")}<span>${String(total).replace(".",",")} heures effectuées</span><span>${meals} repas</span></div><p><b>IT :</b> ${itList.length?esc(itList.join(" · ")):"Aucune IT"}</p>`};
+    const refresh=()=>{let total=0,meals=0,worked=0,cp=0,rtt=0,holiday=0;const itList=[];form.querySelectorAll(".v66-native-day").forEach(day=>{const type=day.dataset.type||"worked",watermark=day.querySelector(".v66-day-watermark"),work=day.querySelector(".v66-native-work-fields");day.classList.toggle("is-absence",type!=="worked");watermark.textContent=type==="cp"?"CONGÉ PAYÉ":type==="rtt"?"RTT":type==="holiday"?"FÉRIÉ":"";work.querySelectorAll("input,select,button").forEach(x=>x.disabled=type!=="worked");if(type!=="worked"){if(type==="cp")cp++;if(type==="rtt")rtt++;if(type==="holiday")holiday++;return}worked++;const rows=[...day.querySelectorAll(".v66-native-site")],matches=rows.map(row=>projectFor(row.querySelector(".v66-native-code").value,row.querySelector(".v66-native-project").value)).filter(Boolean),unknown=rows.some(row=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim();return(code||name)&&(!code||!name||!projectFor(code,name))}),kms=[...new Set(matches.map(p=>Number(p.it_km||0)).filter(Number.isFinite))],it=day.querySelector(".v66-native-it"),warning=day.querySelector(".v66-native-warning");it.value=kms.length===1?String(kms[0]):"";if(it.value)itList.push(`${day.querySelector("header strong").textContent} : ${it.value} km`);warning.hidden=!(unknown||(kms.length!==1&&matches.length));warning.textContent=unknown?"Attention : le code et le nom du chantier doivent être renseignés. Chantier non référencé autorisé.":kms.length>1?"Plusieurs chantiers avec des kilométrages IT différents : décision RH nécessaire.":"Kilométrage IT non renseigné pour ce chantier : 0 km sera appliqué.";day.querySelectorAll(".v66-native-hours").forEach(i=>total+=Number(i.value||0));meals+=Number(day.querySelector(".v66-native-meal").value||0)});const parts=[`${worked} jour${worked>1?"s":""} travaillé${worked>1?"s":""}`];if(cp)parts.push(`${cp} jour${cp>1?"s":""} de congé payé`);if(rtt)parts.push(`${rtt} jour${rtt>1?"s":""} de RTT`);if(holiday)parts.push(`${holiday} jour${holiday>1?"s":""} férié${holiday>1?"s":""}`);form.querySelector(".v66-week-recap").innerHTML=`<strong>Compte rendu de la semaine</strong><div>${parts.map(x=>`<span>${esc(x)}</span>`).join("")}<span>${String(total).replace(".",",")} heures effectuées</span><span>${meals} repas</span></div><p><b>IT :</b> ${itList.length?esc(itList.join(" · ")):"Aucune IT"}</p>`};
     form.addEventListener("input",e=>{const row=e.target.closest(".v66-native-site");if(row&&e.target.matches(".v66-native-code")){const p=projects.find(x=>normalize(x.code)===normalize(e.target.value));if(p)row.querySelector(".v66-native-project").value=p.name}if(row&&e.target.matches(".v66-native-project")){const p=projects.find(x=>normalize(x.name)===normalize(e.target.value));if(p)row.querySelector(".v66-native-code").value=p.code}if(e.target.matches(".v66-template-code")){const p=projects.find(x=>normalize(x.code)===normalize(e.target.value));if(p)form.querySelector(".v66-template-project").value=p.name}if(e.target.matches(".v66-template-project")){const p=projects.find(x=>normalize(x.name)===normalize(e.target.value));if(p)form.querySelector(".v66-template-code").value=p.code}refresh()});
     form.querySelector(".v66-template-apply").onclick=()=>{
       const code=form.querySelector(".v66-template-code").value.trim(),project=form.querySelector(".v66-template-project").value.trim(),hours=Number(form.querySelector(".v66-template-hours").value||0),friday=Number(form.querySelector(".v66-template-friday").value||0),meal=form.querySelector(".v66-template-meal").value;
@@ -1589,7 +1567,7 @@ async function boot(db) {
       refresh();toast("Journée type appliquée à toute la semaine.");
     };
     form.addEventListener("click",e=>{const typeButton=e.target.closest("[data-day-type]");if(typeButton){const day=typeButton.closest(".v66-native-day"),next=typeButton.dataset.dayType,filled=[...day.querySelectorAll(".v66-native-code,.v66-native-project,.v66-native-hours,.v66-native-task")].some(i=>i.value.trim()&&i.value!=="0");if(next!=="worked"&&filled&&!confirm("Cette sélection va effacer les informations déjà saisies pour cette journée. Continuer ?"))return;if(next!=="worked"){day.querySelectorAll(".v66-native-code,.v66-native-project,.v66-native-hours,.v66-native-task,.v66-native-it").forEach(i=>i.value="");day.querySelector(".v66-native-meal").value="0"}day.dataset.type=next;day.querySelectorAll("[data-day-type]").forEach(b=>b.classList.toggle("active",b===typeButton));refresh();return}if(e.target.closest(".v66-native-add")){const sites=e.target.closest(".v66-native-day").querySelector(".v66-native-sites");sites.insertAdjacentHTML("beforeend",siteMarkup());refresh()}if(e.target.closest(".v66-native-remove")){const row=e.target.closest(".v66-native-site"),box=row.parentElement;if(box.children.length>1)row.remove();else{row.querySelectorAll("input").forEach(i=>i.value="")}refresh()}});
-    form.onsubmit=async e=>{e.preventDefault();const incomplete=[...form.querySelectorAll('.v66-native-day[data-type="worked"] .v66-native-site')].some(row=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim(),hours=Number(row.querySelector(".v66-native-hours").value||0);return(code||name||hours)&&(!code||!name)});if(incomplete)return toast("Chaque chantier saisi doit avoir un code et un nom.");if(!confirm("Enregistrer la fiche d’heures et la partager avec le bureau ?"))return;const button=form.querySelector('[type="submit"]'),msg=form.querySelector(".v66-message");button.disabled=true;const payload={iso_year:year,iso_week:week,observations:form.querySelector("textarea").value.trim(),days:[...form.querySelectorAll(".v66-native-day")].map(day=>{const dayType=day.dataset.type||"worked",entries=dayType==="worked"?[...day.querySelectorAll(".v66-native-site")].map((row,position)=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim(),known=projectFor(code,name);return{code,name,hours:Number(row.querySelector(".v66-native-hours").value||0),position,project:known}}).filter(x=>x.code||x.name||x.hours):[],zones=[...new Map(entries.flatMap(x=>(x.project?.project_it_zones||[]).filter(z=>z.establishment_id===profile.establishment_id).map(z=>[z.it_zone_id,z]))).values()],zone=zones.length===1?zones[0]:null;return{work_date:day.dataset.date,day_type:dayType,meal:dayType==="worked"?Number(day.querySelector(".v66-native-meal").value):0,travel_km:0,it_zone_id:dayType==="worked"?(zone?.it_zone_id||null):null,it_zone_label_snapshot:dayType==="worked"?(zone?.it_zones?.label||null):null,it_needs_review:dayType==="worked"&&zones.length!==1&&entries.length>0,establishment_id_snapshot:profile.establishment_id||null,tasks:[],manual_task:dayType==="worked"?day.querySelector(".v66-native-task").value.trim():"",vehicle:"",delivery_note:"",sites:entries.map(({code,name,hours,position})=>({code,name,hours,position}))}})};try{if(!navigator.onLine){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche enregistrée sur l’appareil. Elle sera envoyée automatiquement dès que la connexion sera rétablie.","ok")}else{const{error}=await db.rpc("save_and_submit_timesheet",{payload});if(error)throw error;localStorage.removeItem(nativeDraftKey(year,week));setMessage(msg,"Fiche enregistrée et partagée avec le bureau.","ok");toast("Fiche enregistrée et partagée.");const pageRoot=panel.closest("#v66Content");if(pageRoot)await loadMySheets(pageRoot)}}catch(err){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche conservée sur l’appareil. L’envoi sera retenté automatiquement.","error");console.error(err)}finally{button.disabled=false}};
+    form.onsubmit=async e=>{e.preventDefault();const incomplete=[...form.querySelectorAll('.v66-native-day[data-type="worked"] .v66-native-site')].some(row=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim(),hours=Number(row.querySelector(".v66-native-hours").value||0);return(code||name||hours)&&(!code||!name)});if(incomplete)return toast("Chaque chantier saisi doit avoir un code et un nom.");if(!confirm("Enregistrer la fiche d’heures et la partager avec le bureau ?"))return;const button=form.querySelector('[type="submit"]'),msg=form.querySelector(".v66-message");button.disabled=true;const payload={iso_year:year,iso_week:week,observations:form.querySelector("textarea").value.trim(),days:[...form.querySelectorAll(".v66-native-day")].map(day=>{const dayType=day.dataset.type||"worked",entries=dayType==="worked"?[...day.querySelectorAll(".v66-native-site")].map((row,position)=>{const code=row.querySelector(".v66-native-code").value.trim(),name=row.querySelector(".v66-native-project").value.trim(),known=projectFor(code,name);return{code,name,hours:Number(row.querySelector(".v66-native-hours").value||0),position,project:known}}).filter(x=>x.code||x.name||x.hours):[],kms=[...new Set(entries.map(x=>Number(x.project?.it_km||0)).filter(Number.isFinite))],itKm=kms.length===1?kms[0]:0;return{work_date:day.dataset.date,day_type:dayType,meal:dayType==="worked"?Number(day.querySelector(".v66-native-meal").value):0,travel_km:dayType==="worked"?itKm:0,it_zone_id:null,it_zone_label_snapshot:null,it_needs_review:dayType==="worked"&&kms.length!==1&&entries.some(x=>x.project),establishment_id_snapshot:profile.establishment_id||null,tasks:[],manual_task:dayType==="worked"?day.querySelector(".v66-native-task").value.trim():"",vehicle:"",delivery_note:"",sites:entries.map(({code,name,hours,position})=>({code,name,hours,position}))}})};try{if(!navigator.onLine){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche enregistrée sur l’appareil. Elle sera envoyée automatiquement dès que la connexion sera rétablie.","ok")}else{const{error}=await db.rpc("save_and_submit_timesheet",{payload});if(error)throw error;localStorage.removeItem(nativeDraftKey(year,week));setMessage(msg,"Fiche enregistrée et partagée avec le bureau.","ok");toast("Fiche enregistrée et partagée.");const pageRoot=panel.closest("#v66Content");if(pageRoot)await loadMySheets(pageRoot)}}catch(err){localStorage.setItem(nativeDraftKey(year,week),JSON.stringify(payload));setMessage(msg,"Fiche conservée sur l’appareil. L’envoi sera retenté automatiquement.","error");console.error(err)}finally{button.disabled=false}};
     refresh();
   }
   function openLegacyEditor(_root,year,week){

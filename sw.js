@@ -1,4 +1,4 @@
-const CACHE='antras-v106-1';
+const CACHE='antras-v2-beta1';
 const ASSETS=[
   './',
   './index.html',
@@ -11,7 +11,10 @@ const ASSETS=[
   './js/supabase-config.js',
   './js/v66-app.js',
   './js/v105-personal-project-stats.js',
-  './js/v106-preview-stats.js',
+  './js/v2-role-config.js',
+  './js/v2-shell.js',
+  './js/v2-accounts.js',
+  './js/v2-dashboard.js',
   './js/v96-project-catalog.js',
   './js/project-catalog.js'
 ];
@@ -40,7 +43,7 @@ self.addEventListener('fetch',event=>{
       })
       .catch(()=>caches.match(event.request).then(cached=>{
         if(cached)return cached;
-        if(event.request.mode==='navigate')return caches.match('./index.html');
+        if(event.request.mode==='navigate')return caches.match('./v66.html');
         return Response.error();
       }))
   );

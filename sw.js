@@ -1,4 +1,4 @@
-const CACHE='antras-v104-1';
+const CACHE='antras-v105-1';
 const ASSETS=[
   './',
   './index.html',
@@ -6,12 +6,13 @@ const ASSETS=[
   './manifest.webmanifest',
   './antras-logo.png',
   './icon-192.png',
-  './icon-512.png'
-  ,'./css/v66.css','./css/v95.css','./css/v96.css'
-  ,'./js/supabase-config.js'
-  ,'./js/v66-app.js'
-  ,'./js/v96-project-catalog.js'
-  ,'./js/project-catalog.js'
+  './icon-512.png',
+  './css/v66.css','./css/v95.css','./css/v96.css',
+  './js/supabase-config.js',
+  './js/v66-app.js',
+  './js/v105-personal-project-stats.js',
+  './js/v96-project-catalog.js',
+  './js/project-catalog.js'
 ];
 
 self.addEventListener('install',event=>{

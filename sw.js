@@ -1,4 +1,4 @@
-const CACHE='antras-v94-1';
+const CACHE='antras-v95-1';
 const ASSETS=[
   './',
   './index.html',
@@ -7,7 +7,7 @@ const ASSETS=[
   './antras-logo.png',
   './icon-192.png',
   './icon-512.png'
-  ,'./css/v66.css'
+  ,'./css/v66.css','./css/v95.css'
   ,'./js/supabase-config.js'
   ,'./js/v66-app.js'
   ,'./js/project-catalog.js'

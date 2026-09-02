@@ -29,15 +29,12 @@ if (/^https:\/\/.+\.supabase\.co$/.test(cfg.url || "") && String(cfg.anonKey || 
     if (!session?.user) return null;
     const { data: profile, error } = await db.from("profiles").select("id,first_name,last_name,email,status,role,business_role").eq("id", session.user.id).maybeSingle();
     if (error || !profile) return null;
-    const role = v2Role(profile);
-    state = { profile, role };
-    window.dispatchEvent(new CustomEvent("gestion-btp:v2-context", { detail: { profile, role, permissions: v2Permissions(role) } }));
+    state = { profile, role: v2Role(profile) };
     return state;
   }
 
-  function navButton(label, page) {
-    return `<button type="button" class="v2-dashboard-action" data-v2-page="${esc(page)}">${esc(label)}</button>`;
-  }
+  function currentRole(){return window.GESTION_BTP_V2?.effectiveRole || state.role}
+  function navButton(label, page) {return `<button type="button" class="v2-dashboard-action" data-v2-page="${esc(page)}">${esc(label)}</button>`}
 
   async function managementMetrics() {
     const now = new Date();
@@ -59,7 +56,7 @@ if (/^https:\/\/.+\.supabase\.co$/.test(cfg.url || "") && String(cfg.anonKey || 
   }
 
   async function conductorMetrics(profileId) {
-    const { data: links } = await db.from("project_conductors").select("project_id,projects(id,status)").eq("conductor_id", profileId);
+    const { data: links } = await db.from("project_conductors").select("project_id").eq("conductor_id", profileId);
     const ids = (links||[]).map(x=>x.project_id);
     let hours = 0;
     if (ids.length) {
@@ -70,13 +67,14 @@ if (/^https:\/\/.+\.supabase\.co$/.test(cfg.url || "") && String(cfg.anonKey || 
   }
 
   async function employeeMetrics(profileId) {
-    const { data } = await db.from("v2_project_time_entries").select("hours,project_id,work_date,meal,travel_km").eq("employee_id", profileId);
+    const { data } = await db.from("v2_project_time_entries").select("hours,project_id,work_date,travel_km").eq("employee_id", profileId);
     const rows = data || [];
+    const dayKm = new Map(); rows.forEach(x=>dayKm.set(x.work_date,Math.max(dayKm.get(x.work_date)||0,Number(x.travel_km||0))));
     return {
       hours: rows.reduce((s,x)=>s+Number(x.hours||0),0),
       projects: new Set(rows.map(x=>x.project_id).filter(Boolean)).size,
       days: new Set(rows.map(x=>x.work_date)).size,
-      it: rows.reduce((s,x)=>s+Number(x.travel_km||0),0),
+      it: [...dayKm.values()].reduce((s,x)=>s+x,0),
     };
   }
 
@@ -104,29 +102,24 @@ if (/^https:\/\/.+\.supabase\.co$/.test(cfg.url || "") && String(cfg.anonKey || 
 
   function enforceNav(role) {
     const nav = document.querySelector(".v66-nav"); if (!nav) return;
-    const perms = v2Permissions(role);
     const accountButton = nav.querySelector('[data-page="accounts"]');
-    if (accountButton) accountButton.hidden = !perms.canManageAccounts;
+    if (accountButton) accountButton.hidden = !v2Permissions(role).canManageAccounts;
   }
 
-  async function enhance() {
+  async function enhance(force=false) {
     injectStyles();
-    const ctx = state.profile ? state : await getContext(); if (!ctx) return;
-    enforceNav(ctx.role);
+    if(!state.profile && !(await getContext()))return;
+    const role=currentRole();enforceNav(role);
     const root = document.querySelector("#v66Content");
     const activeHome = document.querySelector('.v66-nav [data-page="home"].active');
-    if (root && activeHome && !root.dataset.v2DashboardRendered) {
-      root.dataset.v2DashboardRendered = "true";
-      try { await renderDashboard(root, ctx.profile, ctx.role); } catch (e) { console.warn("V2 dashboard", e); }
+    if (root && activeHome && (force || root.dataset.v2DashboardRole!==role)) {
+      root.dataset.v2DashboardRole=role;
+      try { await renderDashboard(root, state.profile, role); } catch (e) { console.warn("V2 dashboard", e); }
     }
   }
 
-  document.addEventListener("click", e=>{
-    if (e.target.closest('.v66-nav [data-page]')) {
-      const root=document.querySelector("#v66Content"); if(root) delete root.dataset.v2DashboardRendered;
-      setTimeout(enhance,120);
-    }
-  }, true);
-  const ob = new MutationObserver(()=>{clearTimeout(ob.t);ob.t=setTimeout(enhance,120)}); ob.observe(document.documentElement,{subtree:true,childList:true});
-  setTimeout(enhance,400);
+  window.addEventListener("gestion-btp:v2-context",()=>enhance(true));
+  document.addEventListener("click", e=>{if(e.target.closest('.v66-nav [data-page]'))setTimeout(()=>enhance(true),120)}, true);
+  const ob = new MutationObserver(()=>{clearTimeout(ob.t);ob.t=setTimeout(()=>enhance(false),120)}); ob.observe(document.documentElement,{subtree:true,childList:true});
+  setTimeout(()=>enhance(true),450);
 }

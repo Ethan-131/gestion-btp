@@ -11,7 +11,7 @@ const roleLabels = {
   admin: "Administrateur technique",
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=104", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=108", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -479,7 +479,17 @@ async function boot(db) {
         toast("Compte validé et siège attribué.");
         renderAccounts(shell.querySelector("#v66Content"));
       } catch (err) {
-        setMessage(msg, err.message, "error");
+        console.error("Erreur enregistrement chantier", err);
+        const technical = String(err?.message || "").toLowerCase();
+        let friendly = "Impossible d’enregistrer les modifications du chantier. Vérifiez les informations puis réessayez.";
+        if (technical.includes('planned_hours') && technical.includes('default')) {
+          friendly = "Les heures prévues ne peuvent pas encore être enregistrées : la base de données doit être mise à jour avec le correctif V108.";
+        } else if (technical.includes('duplicate') || technical.includes('unique')) {
+          friendly = "Impossible d’enregistrer ce chantier : une information existe déjà dans la base.";
+        } else if (technical.includes('permission') || technical.includes('policy') || technical.includes('row-level security')) {
+          friendly = "Vous n’avez pas l’autorisation d’effectuer cette modification.";
+        }
+        setMessage(msg, friendly, "error");
       }
     };
   }

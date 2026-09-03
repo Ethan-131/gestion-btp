@@ -1,0 +1,21 @@
+V105 — Refonte complète Chantiers / Analyse
+
+- Nouveau module Pilotage chantiers, responsive ordinateur/mobile.
+- Tableau de bord : chantiers en cours, heures réalisées, à surveiller, dépassements.
+- Cartes chantier avec statut, conducteur, dates, heures consommées / prévues et état de santé.
+- Fiche chantier dédiée avec 4 onglets : Vue d’ensemble, Équipe, Activité, IT.
+- Heures prévues, réalisées, restantes, % consommé.
+- Comparaison temps écoulé / heures consommées.
+- Projection de fin de chantier lorsqu’il y a assez de données.
+- Courbe cumulée et graphique heures par semaine.
+- Salariés intervenus, effectif moyen/max, journées-personnes.
+- Jours actifs, première/dernière activité, semaine la plus chargée.
+- IT total, IT moyen et signalements IT à vérifier.
+- Analyse par mois ou année complète.
+- Comparaison de deux périodes.
+- Recherche chantier et vue dédiée par chantier.
+- Ajout des heures prévues au formulaire chantier, avec calcul automatique à partir des dates (8 h lun-jeu, 7 h ven) modifiable manuellement.
+- Aucun suivi de prix, CA, marge ou coût.
+- Aucune statistique par tâche.
+- Aucun nouveau SQL requis si les colonnes V99 sont déjà présentes.
+- Cache PWA passé en V105.

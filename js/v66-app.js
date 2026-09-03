@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=109", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=110", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -853,21 +853,56 @@ async function boot(db) {
               reason =
                 decision === "rejected" ? prompt("Motif du refus :") || "" : "";
             if (decision === "rejected" && !reason.trim()) return;
+            if (decision === "cancelled") {
+              const confirmed = await appConfirm({
+                title: "Accepter l’annulation ?",
+                message: "L’absence sera annulée et la demande passera dans l’historique.",
+                detail: "Cette action confirme la demande d’annulation du salarié.",
+                confirmLabel: "Accepter l’annulation",
+                cancelLabel: "Retour",
+                tone: "warning",
+              });
+              if (!confirmed) return;
+            }
+            const requestId = b.closest("[data-id]")?.dataset.id;
+            if (!requestId) {
+              await appNotice({
+                title: "Action impossible",
+                message: "La demande n’a pas pu être identifiée. Recharge la page puis réessaie.",
+              });
+              return;
+            }
             b.disabled = true;
+            const originalLabel = b.textContent;
+            b.textContent = "Traitement…";
             try {
               const { error } = await db.rpc("review_leave_request", {
-                target_id: b.closest("[data-id]").dataset.id,
+                target_id: requestId,
                 decision,
                 reason,
               });
               if (error) throw error;
               b.closest(".v66-drawer-overlay")?.remove();
-              toast("Demande mise à jour.");
+              toast(
+                decision === "cancelled"
+                  ? "Annulation acceptée. L’absence a été annulée."
+                  : decision === "approved"
+                    ? "Demande acceptée."
+                    : "Demande refusée.",
+              );
               await renderLeaves(root, monthOffset, calendarVisible);
             } catch (e) {
-              fail(e);
+              console.error("review_leave_request", e);
+              await appNotice({
+                title: decision === "cancelled" ? "Annulation non enregistrée" : "Décision non enregistrée",
+                message: decision === "cancelled"
+                  ? "L’annulation n’a pas pu être acceptée. Vérifie que le correctif Supabase V110 a bien été exécuté, puis réessaie."
+                  : "La décision n’a pas pu être enregistrée. Réessaie dans quelques instants.",
+                detail: "Aucune modification n’a été appliquée à la demande.",
+              });
             } finally {
               b.disabled = false;
+              b.textContent = originalLabel;
             }
           }),
       );

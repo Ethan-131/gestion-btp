@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=111", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=112", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -143,6 +143,8 @@ async function boot(db) {
     profile = null,
     currentPage = "home",
     previewRole = null,
+    previewConductorId = null,
+    previewConductorName = "",
     routeIntent = null,
     authReady = false;
   const pageScrolls=new Map();
@@ -170,6 +172,14 @@ async function boot(db) {
   const isTechnicalAdmin = () => profile?.role === "admin";
   const visibleRole = () =>
     isTechnicalAdmin() && previewRole ? previewRole : profile?.role;
+  const effectiveUserId = () =>
+    isTechnicalAdmin() && previewRole === "conducteur" && previewConductorId
+      ? previewConductorId
+      : profile?.id;
+  const effectiveUserName = () =>
+    isTechnicalAdmin() && previewRole === "conducteur" && previewConductorName
+      ? previewConductorName
+      : fullName(profile);
   const navigateTo = (page, intent = null) => {
     pageScrolls.set(currentPage, shell.scrollTop);
     routeIntent = intent;
@@ -330,16 +340,17 @@ async function boot(db) {
     if (currentPage !== "settings" && !pages.some((x) => x[0] === currentPage)) currentPage = "home";
     const role = visibleRole();
     const preview = isTechnicalAdmin()
-      ? `<label class="v66-role-preview"><span>Aperçu test</span><select id="v66RolePreview">${Object.entries(
+      ? `<div class="v112-preview-stack"><label class="v66-role-preview"><span>Aperçu test</span><select id="v66RolePreview">${Object.entries(
           roleLabels,
         )
           .map(
             ([id, label]) =>
               `<option value="${id}" ${role === id ? "selected" : ""}>${esc(label)}</option>`,
           )
-          .join("")}</select></label>`
+          .join("")}</select></label>${previewRole === "conducteur" ? '<label class="v66-role-preview v112-conductor-preview"><span>Conducteur simulé</span><select id="v112ConductorPreview"><option value="">Chargement…</option></select></label>' : ""}</div>`
       : "";
-    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span><button type="button" class="v66-settings-button ${currentPage === "settings" ? "active" : ""}" id="v66Settings" title="Paramètres du compte" aria-label="Paramètres du compte">⚙</button></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? '<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste Administrateur technique.</div>' : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}</nav><main class="v66-main" id="v66Content"></main>`;
+    const simulatedIdentity = previewRole === "conducteur" && previewConductorName ? previewConductorName : fullName(profile);
+    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span><button type="button" class="v66-settings-button ${currentPage === "settings" ? "active" : ""}" id="v66Settings" title="Paramètres du compte" aria-label="Paramètres du compte">⚙</button></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(simulatedIdentity)}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? `<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste Administrateur technique.${previewRole === "conducteur" && previewConductorName ? ` Conducteur simulé : ${esc(previewConductorName)}.` : ""}</div>` : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}</nav><main class="v66-main" id="v66Content"></main>`;
     renderOffline();
     shell.querySelectorAll("[data-page]").forEach(
       (b) =>
@@ -350,9 +361,11 @@ async function boot(db) {
     shell.querySelector("#v66Settings").onclick = () => navigateTo("settings");
     shell.querySelector("#v66RolePreview")?.addEventListener("change", (e) => {
       previewRole = e.target.value === profile.role ? null : e.target.value;
+      if (previewRole !== "conducteur") { previewConductorId = null; previewConductorName = ""; }
       currentPage = "home";
       appScreen();
     });
+    if (previewRole === "conducteur" && isTechnicalAdmin()) setupConductorPreview();
     const content = shell.querySelector("#v66Content");
     if (currentPage === "home") renderHome(content);
     if (currentPage === "accounts") renderAccounts(content);
@@ -363,6 +376,39 @@ async function boot(db) {
     if (currentPage === "legacy") renderLegacy(content);
     if (currentPage === "settings") renderSettings(content);
     requestAnimationFrame(()=>{shell.scrollTop=pageScrolls.get(currentPage)||0});
+  }
+
+  async function setupConductorPreview() {
+    const select = shell.querySelector("#v112ConductorPreview");
+    if (!select) return;
+    try {
+      const { data, error } = await db.from("profiles").select("id,first_name,last_name,email").eq("role","conducteur").eq("status","active").order("last_name").order("first_name");
+      if (error) throw error;
+      const conductors = data || [];
+      if (!conductors.length) {
+        select.innerHTML = '<option value="">Aucun conducteur actif</option>';
+        previewConductorId = null; previewConductorName = "";
+        return;
+      }
+      if (!previewConductorId || !conductors.some(c=>c.id===previewConductorId)) {
+        previewConductorId = conductors[0].id;
+        previewConductorName = fullName(conductors[0]);
+      }
+      select.innerHTML = conductors.map(c=>`<option value="${c.id}" ${c.id===previewConductorId?"selected":""}>${esc(fullName(c))}</option>`).join("");
+      select.onchange = () => {
+        const chosen = conductors.find(c=>c.id===select.value);
+        previewConductorId = chosen?.id || null;
+        previewConductorName = chosen ? fullName(chosen) : "";
+        currentPage = "home";
+        appScreen();
+      };
+      const visibleName = shell.querySelector(".v66-user strong");
+      if (visibleName && previewConductorName) visibleName.textContent = previewConductorName;
+      if (currentPage === "home") renderHome(shell.querySelector("#v66Content"));
+    } catch (e) {
+      console.error(e);
+      select.innerHTML = '<option value="">Impossible de charger</option>';
+    }
   }
 
   async function renderHome(root) {
@@ -386,12 +432,51 @@ async function boot(db) {
         dashboard.querySelector('[data-go="leaves"]').onclick=()=>navigateTo("leaves",{group:"pending"});
         dashboard.querySelector('[data-go="team"]').onclick=()=>navigateTo("legacy",{employeeSheets:true,year:previous.year,week:previous.week,filter:"missing"});
       } else if (role === "conducteur") {
-        const { data: projects, error } = await db.from("projects").select("id,code,name,planned_end_date,planned_hours,status,project_conductors!inner(conductor_id)").eq("project_conductors.conductor_id",profile.id).in("status",["active","overdue"]).order("planned_end_date",{ascending:true}).limit(8);
+        const conductorId = effectiveUserId();
+        if (!conductorId) { dashboard.innerHTML='<div class="v112-empty-dashboard"><div class="v112-empty-icon">⌁</div><h2>Aucun conducteur sélectionné</h2><p>Choisis un conducteur dans le mode aperçu pour tester son tableau de bord.</p></div>'; return; }
+        const now=currentIsoWeek(), bounds=isoWeekBounds(now.year,now.week);
+        const { data: projects, error } = await db.from("projects").select("id,code,name,planned_start_date,planned_end_date,planned_hours,status,project_conductors!inner(conductor_id)").eq("project_conductors.conductor_id",conductorId).in("status",["active","overdue"]).order("planned_end_date",{ascending:true}).limit(12);
         if(error)throw error;
-        const ids=(projects||[]).map(p=>p.id);let actual=new Map();
-        if(ids.length){const {data:sites,error:se}=await db.from("timesheet_sites").select("project_id,hours").in("project_id",ids);if(se)throw se;(sites||[]).forEach(x=>actual.set(x.project_id,(actual.get(x.project_id)||0)+Number(x.hours||0)))}
-        dashboard.innerHTML = (projects||[]).length ? `<div class="v66-card v66-dashboard-wide"><h2>Chantiers en cours</h2><div class="v66-list">${projects.map(p=>{const used=actual.get(p.id)||0,pct=Number(p.planned_hours)>0?Math.round(used/Number(p.planned_hours)*100):0;return `<button class="v66-project-shortcut" data-project="${p.id}"><span><strong>${esc(p.code)} — ${esc(p.name)}</strong><small>Fin prévue : ${fmtDate(p.planned_end_date)}</small></span><span><b>${pct}%</b><small>${used.toLocaleString("fr-FR")} / ${Number(p.planned_hours||0).toLocaleString("fr-FR")} h</small></span></button>`}).join("")}</div></div>` : '<div class="v66-card v66-empty">Aucun chantier en cours ne t’est attribué.</div>';
+        const ids=(projects||[]).map(p=>p.id), actual=new Map(), weekHours=new Map(), weekEmployees=new Map(), flaggedSheets=[];
+        if(ids.length){
+          const [{data:sites,error:se},{data:weekSheets,error:we}] = await Promise.all([
+            db.from("timesheet_sites").select("project_id,hours").in("project_id",ids),
+            db.from("timesheets").select("id,employee_id,status,profiles!timesheets_employee_id_fkey(first_name,last_name),timesheet_days(work_date,it_needs_review,timesheet_sites(project_id,hours))").eq("iso_year",now.year).eq("iso_week",now.week)
+          ]);
+          if(se)throw se;if(we)throw we;
+          (sites||[]).forEach(x=>actual.set(x.project_id,(actual.get(x.project_id)||0)+Number(x.hours||0)));
+          (weekSheets||[]).forEach(sheet=>{
+            let touches=false, hasItWarning=false;
+            (sheet.timesheet_days||[]).forEach(day=>{
+              if(day.it_needs_review)hasItWarning=true;
+              (day.timesheet_sites||[]).forEach(site=>{
+                if(!ids.includes(site.project_id))return; touches=true;
+                weekHours.set(site.project_id,(weekHours.get(site.project_id)||0)+Number(site.hours||0));
+                if(!weekEmployees.has(site.project_id))weekEmployees.set(site.project_id,new Set());
+                weekEmployees.get(site.project_id).add(sheet.employee_id);
+              });
+            });
+            if(touches&&hasItWarning)flaggedSheets.push(sheet);
+          });
+        }
+        const totalWeekHours=[...weekHours.values()].reduce((a,b)=>a+b,0), uniqueEmployees=new Set(); weekEmployees.forEach(set=>set.forEach(id=>uniqueEmployees.add(id)));
+        const projectCards=(projects||[]).map(p=>{const used=actual.get(p.id)||0,planned=Number(p.planned_hours||0),pct=planned>0?Math.round(used/planned*100):0,health=v105Health(p,used),week=weekHours.get(p.id)||0,people=weekEmployees.get(p.id)?.size||0;return {p,used,planned,pct,health,week,people}});
+        const warnings=projectCards.filter(x=>["warning","danger"].includes(x.health.tone));
+        const name=effectiveUserName();
+        dashboard.innerHTML = (projects||[]).length ? `
+          <section class="v112-conductor-hero v66-dashboard-wide"><div><span class="v112-eyebrow">TABLEAU DE BORD CONDUCTEUR</span><h2>${esc(name)}</h2><p>${esc(weekTitle(now.year,now.week))} · synthèse de tes chantiers attribués</p></div><button class="v66-btn" data-go-projects>Voir tous mes chantiers</button></section>
+          <div class="v112-kpi"><small>Chantiers en cours</small><strong>${projects.length}</strong><span>attribués</span></div>
+          <div class="v112-kpi"><small>Heures cette semaine</small><strong>${v105FmtHours(totalWeekHours)}</strong><span>sur tes chantiers</span></div>
+          <div class="v112-kpi"><small>Salariés mobilisés</small><strong>${uniqueEmployees.size}</strong><span>cette semaine</span></div>
+          <div class="v112-kpi ${warnings.length?"is-warning":""}"><small>À surveiller</small><strong>${warnings.length}</strong><span>chantier${warnings.length>1?"s":""}</span></div>
+          <section class="v66-card v66-dashboard-wide v112-conductor-projects"><div class="v112-section-head"><div><h2>Mes chantiers</h2><p>Les chantiers qui demandent ton attention apparaissent en premier.</p></div></div><div class="v112-project-grid">${projectCards.sort((a,b)=>({danger:0,warning:1,good:2,neutral:3,upcoming:4}[a.health.tone]-({danger:0,warning:1,good:2,neutral:3,upcoming:4}[b.health.tone]))).map(({p,used,planned,pct,health,week,people})=>`<button class="v112-project-card" data-project="${p.id}"><div class="v112-project-card-top"><span><small>${esc(p.code)}</small><strong>${esc(p.name)}</strong></span><b class="v105-health ${health.tone}"><i></i>${esc(health.label)}</b></div><div class="v112-mini-progress"><i style="width:${Math.min(100,Math.max(0,pct))}%"></i></div><div class="v112-project-stats"><span><small>Total</small><b>${v105FmtHours(used)}${planned?` / ${v105FmtHours(planned)}`:""}</b></span><span><small>Cette semaine</small><b>${v105FmtHours(week)}</b></span><span><small>Équipe</small><b>${people} salarié${people>1?"s":""}</b></span></div><p>${esc(health.text)}</p></button>`).join("")}</div></section>
+          <section class="v66-card v112-conductor-alerts"><div class="v112-section-head"><div><h2>À surveiller</h2><p>Alertes utiles sur tes chantiers.</p></div></div>${warnings.length?`<div class="v112-alert-list">${warnings.slice(0,4).map(x=>`<button data-project="${x.p.id}" class="v112-alert ${x.health.tone}"><span>!</span><div><strong>${esc(x.p.name)}</strong><small>${esc(x.health.text)}</small></div><b>›</b></button>`).join("")}</div>`:'<div class="v112-calm-state">✓ Aucun chantier en alerte actuellement.</div>'}</section>
+          <section class="v66-card v112-conductor-alerts"><div class="v112-section-head"><div><h2>Fiches & IT</h2><p>Points à contrôler cette semaine.</p></div></div><div class="v112-quick-stat"><strong>${flaggedSheets.length}</strong><span>fiche${flaggedSheets.length>1?"s":""} avec IT à vérifier</span></div><button class="v66-btn" data-go-sheets>Consulter les fiches liées à mes chantiers</button></section>`
+        : `<section class="v112-empty-dashboard v66-dashboard-wide"><div class="v112-empty-icon">⌁</div><h2>Aucun chantier en cours attribué</h2><p>${previewRole==="conducteur"?`Le conducteur simulé ${esc(name)} n’a actuellement aucun chantier en cours.`:"Les chantiers dont tu es conducteur apparaîtront ici automatiquement."}</p><div class="v112-empty-actions"><button class="v66-btn" data-go-sheets>Consulter les fiches d’heures</button><button class="v66-btn" data-go-leaves>Congés & RTT</button></div></section>`;
         dashboard.querySelectorAll("[data-project]").forEach(b=>b.onclick=()=>navigateTo("projects",{projectTab:"stats",projectId:b.dataset.project}));
+        dashboard.querySelector("[data-go-projects]")?.addEventListener("click",()=>navigateTo("projects"));
+        dashboard.querySelectorAll("[data-go-sheets]").forEach(b=>b.onclick=()=>navigateTo("legacy",{employeeSheets:true}));
+        dashboard.querySelector("[data-go-leaves]")?.addEventListener("click",()=>navigateTo("leaves"));
       } else {
         const now=currentIsoWeek(),{data,error}=await db.from("timesheets").select("id,status,iso_year,iso_week").eq("employee_id",profile.id).eq("iso_year",now.year).eq("iso_week",now.week).maybeSingle();if(error)throw error;
         const editable=!data||["draft","rejected","changed_after_validation"].includes(data.status),label=!data?"Remplir ma fiche":editable?"Continuer ma fiche":"Voir ma fiche";
@@ -739,7 +824,7 @@ async function boot(db) {
   async function renderLeaves(root, monthOffset = 0, calendarVisible = true) {
     const role = visibleRole(),
       canReview = canReviewAllRole(role),
-      canCreate = ["salarie", "conducteur", ...executiveRoles].includes(role);
+      canCreate = ["salarie", "conducteur", ...executiveRoles].includes(role) && !previewRole;
     const month = new Date();
     month.setUTCDate(1);
     month.setUTCMonth(month.getUTCMonth() + monthOffset);
@@ -800,7 +885,7 @@ async function boot(db) {
       const longDate=value=>value?new Date(`${value}T12:00:00Z`).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"UTC"}):"—";
       const longDateTime=value=>value?new Date(value).toLocaleString("fr-FR",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
       const leaveDrawerActions=r=>{
-        const own=r.employee_id===profile.id;
+        const own=r.employee_id===effectiveUserId();
         if(canReview&&r.status==="pending")return '<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>';
         if(canReview&&r.status==="cancellation_requested")return '<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>';
         if(own&&!canReview&&r.status==="pending")return '<button class="v66-btn danger" data-leave-cancel="cancelled">Annuler la demande</button>';
@@ -815,7 +900,7 @@ async function boot(db) {
         document.body.appendChild(drawer);drawer.querySelector("[data-close]").onclick=()=>drawer.remove();drawer.onclick=e=>{if(e.target===drawer)drawer.remove()};bindLeaveActions(drawer)
       };
       const cardHtml = (r) => {
-        const own=r.employee_id===profile.id,showType=role!=="conducteur"||own,summary=requestSummary(r),requestType=summary.cp&&summary.rtt?"Congés payés + RTT":summary.rtt?"RTT":summary.cp?"Congés payés":showType?(leaveTypeLabels[r.leave_type]||"Absence"):"Absence";
+        const own=r.employee_id===effectiveUserId(),showType=role!=="conducteur"||own,summary=requestSummary(r),requestType=summary.cp&&summary.rtt?"Congés payés + RTT":summary.rtt?"RTT":summary.cp?"Congés payés":showType?(leaveTypeLabels[r.leave_type]||"Absence"):"Absence";
         return `<button type="button" class="v66-card v66-leave-card v111-leave-card" data-request-id="${r.id}"><div class="v66-pagehead"><div><strong>${esc(fullName(r.profiles))} · ${esc(requestType)}</strong><p>${summary.start===summary.end?fmtDate(summary.start):`Du ${fmtDate(summary.start)} au ${fmtDate(summary.end)}`} · ${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</p></div><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span></div><span class="v111-card-open">Voir le détail ›</span></button>`;
       };
       if (canReview) {
@@ -1176,7 +1261,10 @@ async function boot(db) {
         db.from("timesheet_sites").select("project_id,hours")
       ]);
       if(error)throw error;if(siteError)throw siteError;
+      const actorId=effectiveUserId();
+      const visibleProjects = role === "conducteur" ? (data||[]).filter(p=>(p.project_conductors||[]).some(x=>x.conductor_id===actorId)) : (data||[]);
       const actual=new Map();(sites||[]).forEach(x=>{if(x.project_id)actual.set(x.project_id,(actual.get(x.project_id)||0)+Number(x.hours||0))});
+      data.splice(0,data.length,...visibleProjects);
       let activeCategory="active",searchValue="";const tabs=root.querySelector("#v66ProjectCategoryTabs"),list=root.querySelector("#v66Projects"),kpis=root.querySelector("#v105PortfolioKpis");
       const paintKpis=()=>{const active=data.filter(p=>projectTimeCategory(p)==="active"),healths=active.map(p=>v105Health(p,actual.get(p.id)||0));const hours=active.reduce((s,p)=>s+(actual.get(p.id)||0),0),warnings=healths.filter(h=>h.tone==="warning").length,danger=healths.filter(h=>h.tone==="danger").length;kpis.innerHTML=`<article><small>Chantiers en cours</small><strong>${active.length}</strong><span>actuellement</span></article><article><small>Heures réalisées</small><strong>${v105FmtHours(hours)}</strong><span>sur les chantiers en cours</span></article><article class="${warnings?"is-warning":""}"><small>À surveiller</small><strong>${warnings}</strong><span>écart planning / heures</span></article><article class="${danger?"is-danger":""}"><small>En dépassement</small><strong>${danger}</strong><span>prévisionnel horaire dépassé</span></article>`};
       const paint=()=>{
@@ -1186,7 +1274,7 @@ async function boot(db) {
         tabs.querySelectorAll("[data-project-category]").forEach(b=>b.onclick=()=>{activeCategory=b.dataset.projectCategory;paint()});
         const filtered=data.filter(p=>projectTimeCategory(p)===activeCategory&&smartSearchMatch(`${p.code} ${p.name} ${(p.project_conductors||[]).map(x=>fullName(x.profiles)).join(" ")}`,searchValue));
         list.innerHTML=filtered.length?filtered.map(p=>{
-          const used=actual.get(p.id)||0,planned=Number(p.planned_hours||0),pct=planned>0?used/planned*100:null,health=v105Health(p,used),assigned=(p.project_conductors||[]).some(x=>x.conductor_id===profile.id),canEdit=canManageProjectsRole(role),conductors=(p.project_conductors||[]).map(x=>fullName(x.profiles)).filter(Boolean).join(", ")||"Aucun conducteur";
+          const used=actual.get(p.id)||0,planned=Number(p.planned_hours||0),pct=planned>0?used/planned*100:null,health=v105Health(p,used),assigned=(p.project_conductors||[]).some(x=>x.conductor_id===effectiveUserId()),canEdit=canManageProjectsRole(role),conductors=(p.project_conductors||[]).map(x=>fullName(x.profiles)).filter(Boolean).join(", ")||"Aucun conducteur";
           return `<article class="v105-project-card" data-id="${p.id}" data-open-project="${p.id}" tabindex="0"><div class="v105-project-card-main"><div class="v105-project-title"><div><small>${esc(p.code)}</small><h3>${esc(p.name)}</h3></div><span class="v105-health ${health.tone}"><i></i>${esc(health.label)}</span></div><div class="v105-project-meta"><span>👤 ${esc(conductors)}</span><span>📅 ${fmtDate(p.planned_start_date)} → ${fmtDate(p.planned_end_date)}</span></div><div class="v105-progress-block"><div><span>Heures consommées</span><strong>${v105FmtHours(used)}${planned?` <small>/ ${v105FmtHours(planned)}</small>`:""}</strong></div><div class="v105-progress-track"><i class="${health.tone}" style="width:${Math.min(100,Math.max(0,pct||0))}%"></i></div><div class="v105-progress-foot"><span>${pct!==null?`${Math.round(pct)} % consommé`:"Prévisionnel horaire à renseigner"}</span><span>${planned?`${v105FmtHours(Math.max(0,planned-used))} restantes`:""}</span></div></div><p class="v105-health-note">${esc(health.text)}</p></div><div class="v105-project-card-actions"><span class="v66-pill ${projectTimeCategory(p)}">${projectCategoryLabels[projectTimeCategory(p)]}</span>${canEdit?`<button type="button" class="v66-btn" data-edit-project="${p.id}">Modifier</button>`:""}<button type="button" class="v105-open-arrow" aria-label="Ouvrir la fiche chantier">›</button></div></article>`
         }).join(""):'<div class="v66-card v66-empty">Aucun chantier trouvé.</div>';
         list.querySelectorAll("[data-open-project]").forEach(card=>{const open=()=>{routeIntent={projectTab:"stats",projectId:card.dataset.openProject};renderStats(root)};card.onclick=e=>{if(e.target.closest("[data-edit-project]"))return;open()};card.onkeydown=e=>{if(e.key==="Enter")open()}});

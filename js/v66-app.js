@@ -5,13 +5,27 @@ const configured =
   /^https:\/\/.+\.supabase\.co$/.test(cfg.url || "") &&
   String(cfg.anonKey || "").length > 30;
 const roleLabels = {
-  salarie: "Salarié",
-  conducteur: "Conducteur de travaux",
-  rh: "RH / Direction",
   admin: "Administrateur technique",
+  patron: "Patron",
+  rh: "RH / Direction",
+  conducteur: "Conducteur de travaux",
+  salarie: "Salarié",
+};
+const executiveRoles = ["admin", "patron", "rh"];
+const isExecutiveRole = (role) => executiveRoles.includes(role);
+const canManageAccountsRole = (role) => isExecutiveRole(role);
+const canReviewAllRole = (role) => isExecutiveRole(role);
+const canManageProjectsRole = (role) => isExecutiveRole(role);
+const canSeeProjectPeopleRole = (role) => ["conducteur", ...executiveRoles].includes(role);
+const canSeeEmployeeSheetsRole = (role) => ["conducteur", ...executiveRoles].includes(role);
+const assignableRolesFor = (role) => {
+  if (role === "admin") return ["admin", "patron", "rh", "conducteur", "salarie"];
+  if (role === "patron") return ["patron", "rh", "conducteur", "salarie"];
+  if (role === "rh") return ["rh", "conducteur", "salarie"];
+  return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=108", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=109", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -153,11 +167,9 @@ async function boot(db) {
     `${p?.first_name || ""} ${p?.last_name || ""}`.trim() ||
     p?.email ||
     "Compte";
-  const isEthan = () =>
-    String(session?.user?.email || "").toLowerCase() ===
-    "ethan.mijalkovic1@gmail.com";
+  const isTechnicalAdmin = () => profile?.role === "admin";
   const visibleRole = () =>
-    isEthan() && previewRole ? previewRole : profile?.role;
+    isTechnicalAdmin() && previewRole ? previewRole : profile?.role;
   const navigateTo = (page, intent = null) => {
     pageScrolls.set(currentPage, shell.scrollTop);
     routeIntent = intent;
@@ -300,8 +312,8 @@ async function boot(db) {
   function allowedPages() {
     const role = visibleRole();
     const pages = [["home", "Accueil"]];
-    if (role === "rh") pages.push(["accounts", "Comptes"]);
-    if (["conducteur", "rh", "admin"].includes(role))
+    if (canManageAccountsRole(role)) pages.push(["accounts", "Comptes"]);
+    if (["conducteur", ...executiveRoles].includes(role))
       pages.push(["projects", "Chantiers"]);
     pages.push(["leaves", "Congés & RTT"]);
     pages.push(["legacy", "Fiches d’heures"]);
@@ -317,7 +329,7 @@ async function boot(db) {
     }
     if (currentPage !== "settings" && !pages.some((x) => x[0] === currentPage)) currentPage = "home";
     const role = visibleRole();
-    const preview = isEthan()
+    const preview = isTechnicalAdmin()
       ? `<label class="v66-role-preview"><span>Aperçu test</span><select id="v66RolePreview">${Object.entries(
           roleLabels,
         )
@@ -327,7 +339,7 @@ async function boot(db) {
           )
           .join("")}</select></label>`
       : "";
-    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span><button type="button" class="v66-settings-button ${currentPage === "settings" ? "active" : ""}" id="v66Settings" title="Paramètres du compte" aria-label="Paramètres du compte">⚙</button></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? '<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste RH.</div>' : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}</nav><main class="v66-main" id="v66Content"></main>`;
+    shell.innerHTML = `<header class="v66-top"><div class="v66-brand"><img src="antras-logo.png" alt=""><span>Gestion BTP</span><button type="button" class="v66-settings-button ${currentPage === "settings" ? "active" : ""}" id="v66Settings" title="Paramètres du compte" aria-label="Paramètres du compte">⚙</button></div><div class="v66-top-actions">${preview}<div class="v66-user"><strong>${esc(fullName(profile))}</strong><span>${esc(roleLabels[role])}${previewRole ? " · simulation" : ""}</span></div></div></header>${previewRole ? '<div class="v66-preview-banner">Mode aperçu : l’affichage est simulé, ton véritable compte reste Administrateur technique.</div>' : ""}<nav class="v66-nav">${pages.map(([id, label]) => `<button data-page="${id}" class="${id === currentPage ? "active" : ""}">${esc(label)}</button>`).join("")}</nav><main class="v66-main" id="v66Content"></main>`;
     renderOffline();
     shell.querySelectorAll("[data-page]").forEach(
       (b) =>
@@ -358,7 +370,7 @@ async function boot(db) {
     root.innerHTML = `<section class="v66-page"><div class="v66-pagehead"><div><h1>Bonjour ${esc(profile.first_name || "")}</h1><p>Voici les actions utiles pour ton rôle ${esc(roleLabels[role])}.</p></div></div><div class="v66-dashboard" id="v66Dashboard"><div class="v66-card v66-empty">Chargement de ton tableau de bord…</div></div></section>`;
     const dashboard = root.querySelector("#v66Dashboard");
     try {
-      if (role === "rh") {
+      if (isExecutiveRole(role)) {
         const now = currentIsoWeek(), previousDate = new Date(isoWeekBounds(now.year, now.week).monday);
         previousDate.setUTCDate(previousDate.getUTCDate() - 7);
         const previous = isoWeekFromDate(previousDate);
@@ -453,7 +465,7 @@ async function boot(db) {
     const modal = el(
       "div",
       { class: "v66-modal" },
-      `<form class="v66-card v66-form"><h2>Valider le compte</h2><label class="v66-field">Rôle<select name="role" required><option value="salarie">Salarié</option><option value="conducteur">Conducteur de travaux</option><option value="rh">RH / Direction</option><option value="admin">Administrateur technique</option></select></label><label class="v66-field">Siège de rattachement<select name="establishment_id" required><option value="">Choisir le siège…</option>${(establishments || []).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><p class="v66-help">Le siège de rattachement reste utilisé pour l’organisation des comptes. Les IT sont désormais définies directement en kilomètres sur chaque chantier.</p><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Confirmer</button></div><div class="v66-message"></div></form>`,
+      `<form class="v66-card v66-form"><h2>Valider le compte</h2><label class="v66-field">Rôle<select name="role" required>${assignableRolesFor(visibleRole()).map(id=>`<option value="${id}">${esc(roleLabels[id])}</option>`).join("")}</select></label><label class="v66-field">Siège de rattachement<select name="establishment_id" required><option value="">Choisir le siège…</option>${(establishments || []).map((x) => `<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></label><p class="v66-help">Le siège de rattachement reste utilisé pour l’organisation des comptes. Les IT sont désormais définies directement en kilomètres sur chaque chantier.</p><div class="v66-actions"><button type="button" class="v66-btn" data-close>Annuler</button><button class="v66-btn primary">Confirmer</button></div><div class="v66-message"></div></form>`,
     );
     document.body.appendChild(modal);
     modal.querySelector("[data-close]").onclick = () => modal.remove();
@@ -500,7 +512,7 @@ async function boot(db) {
     const modal = el(
       "div",
       { class: "v66-drawer-overlay" },
-      `<form class="v66-side-drawer v66-account-drawer"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(account))}</h2><small>${esc(account.email||"")}</small><span class="v66-pill active">Compte actif</span></div></div><div class="v66-drawer-tools"><button type="button" class="v66-icon-button" data-account-menu aria-label="Actions du compte">⋮</button><button type="button" class="v66-icon-button" data-close aria-label="Fermer">×</button><div class="v66-account-menu" hidden><button type="button" data-disable-account ${account.id===profile.id?"disabled":""}>Supprimer l’accès</button></div></div></header><main><section><h3>Rôle dans l’application</h3><div class="v66-choice-list">${Object.entries(roleLabels).map(([id,label])=>`<label class="v66-choice-tile"><input type="radio" name="role" value="${id}" ${account.role===id?"checked":""} required><span><b>${esc(label)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><section><h3>Siège de rattachement</h3><div class="v66-choice-list">${(establishments||[]).filter(x=>x.active).map(x=>`<label class="v66-choice-tile"><input type="radio" name="establishment_id" value="${x.id}" ${account.establishment_id===x.id?"checked":""} required><span><b>${esc(x.name)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><div class="v66-message"></div></main><footer><button class="v66-btn primary">Enregistrer les modifications</button><button type="button" class="v66-link-btn" data-close>Annuler</button></footer></form>`,
+      `<form class="v66-side-drawer v66-account-drawer"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(account))}</h2><small>${esc(account.email||"")}</small><span class="v66-pill active">Compte actif</span></div></div><div class="v66-drawer-tools"><button type="button" class="v66-icon-button" data-account-menu aria-label="Actions du compte">⋮</button><button type="button" class="v66-icon-button" data-close aria-label="Fermer">×</button><div class="v66-account-menu" hidden><button type="button" data-disable-account ${account.id===profile.id?"disabled":""}>Supprimer l’accès</button></div></div></header><main><section><h3>Rôle dans l’application</h3><div class="v66-choice-list">${Object.entries(roleLabels).filter(([id])=>assignableRolesFor(visibleRole()).includes(id)||account.role===id).map(([id,label])=>`<label class="v66-choice-tile"><input type="radio" name="role" value="${id}" ${account.role===id?"checked":""} ${!assignableRolesFor(visibleRole()).includes(id)?"disabled":""} required><span><b>${esc(label)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><section><h3>Siège de rattachement</h3><div class="v66-choice-list">${(establishments||[]).filter(x=>x.active).map(x=>`<label class="v66-choice-tile"><input type="radio" name="establishment_id" value="${x.id}" ${account.establishment_id===x.id?"checked":""} required><span><b>${esc(x.name)}</b><i aria-hidden="true"></i></span></label>`).join("")}</div></section><div class="v66-message"></div></main><footer><button class="v66-btn primary">Enregistrer les modifications</button><button type="button" class="v66-link-btn" data-close>Annuler</button></footer></form>`,
     );
     document.body.appendChild(modal);
     modal.querySelectorAll("[data-close]").forEach(button=>button.onclick=()=>modal.remove());
@@ -726,8 +738,8 @@ async function boot(db) {
 
   async function renderLeaves(root, monthOffset = 0, calendarVisible = true) {
     const role = visibleRole(),
-      canReview = role === "rh",
-      canCreate = ["salarie", "conducteur", "rh", "admin"].includes(role);
+      canReview = canReviewAllRole(role),
+      canCreate = ["salarie", "conducteur", ...executiveRoles].includes(role);
     const month = new Date();
     month.setUTCDate(1);
     month.setUTCMonth(month.getUTCMonth() + monthOffset);
@@ -1151,7 +1163,7 @@ async function boot(db) {
         tabs.querySelectorAll("[data-project-category]").forEach(b=>b.onclick=()=>{activeCategory=b.dataset.projectCategory;paint()});
         const filtered=data.filter(p=>projectTimeCategory(p)===activeCategory&&smartSearchMatch(`${p.code} ${p.name} ${(p.project_conductors||[]).map(x=>fullName(x.profiles)).join(" ")}`,searchValue));
         list.innerHTML=filtered.length?filtered.map(p=>{
-          const used=actual.get(p.id)||0,planned=Number(p.planned_hours||0),pct=planned>0?used/planned*100:null,health=v105Health(p,used),assigned=(p.project_conductors||[]).some(x=>x.conductor_id===profile.id),canEdit=["rh","admin"].includes(role)||(role==="conducteur"&&assigned),conductors=(p.project_conductors||[]).map(x=>fullName(x.profiles)).filter(Boolean).join(", ")||"Aucun conducteur";
+          const used=actual.get(p.id)||0,planned=Number(p.planned_hours||0),pct=planned>0?used/planned*100:null,health=v105Health(p,used),assigned=(p.project_conductors||[]).some(x=>x.conductor_id===profile.id),canEdit=canManageProjectsRole(role),conductors=(p.project_conductors||[]).map(x=>fullName(x.profiles)).filter(Boolean).join(", ")||"Aucun conducteur";
           return `<article class="v105-project-card" data-id="${p.id}" data-open-project="${p.id}" tabindex="0"><div class="v105-project-card-main"><div class="v105-project-title"><div><small>${esc(p.code)}</small><h3>${esc(p.name)}</h3></div><span class="v105-health ${health.tone}"><i></i>${esc(health.label)}</span></div><div class="v105-project-meta"><span>👤 ${esc(conductors)}</span><span>📅 ${fmtDate(p.planned_start_date)} → ${fmtDate(p.planned_end_date)}</span></div><div class="v105-progress-block"><div><span>Heures consommées</span><strong>${v105FmtHours(used)}${planned?` <small>/ ${v105FmtHours(planned)}</small>`:""}</strong></div><div class="v105-progress-track"><i class="${health.tone}" style="width:${Math.min(100,Math.max(0,pct||0))}%"></i></div><div class="v105-progress-foot"><span>${pct!==null?`${Math.round(pct)} % consommé`:"Prévisionnel horaire à renseigner"}</span><span>${planned?`${v105FmtHours(Math.max(0,planned-used))} restantes`:""}</span></div></div><p class="v105-health-note">${esc(health.text)}</p></div><div class="v105-project-card-actions"><span class="v66-pill ${projectTimeCategory(p)}">${projectCategoryLabels[projectTimeCategory(p)]}</span>${canEdit?`<button type="button" class="v66-btn" data-edit-project="${p.id}">Modifier</button>`:""}<button type="button" class="v105-open-arrow" aria-label="Ouvrir la fiche chantier">›</button></div></article>`
         }).join(""):'<div class="v66-card v66-empty">Aucun chantier trouvé.</div>';
         list.querySelectorAll("[data-open-project]").forEach(card=>{const open=()=>{routeIntent={projectTab:"stats",projectId:card.dataset.openProject};renderStats(root)};card.onclick=e=>{if(e.target.closest("[data-edit-project]"))return;open()};card.onkeydown=e=>{if(e.key==="Enter")open()}});
@@ -1222,11 +1234,11 @@ async function boot(db) {
         byYear.get(w.year).get(month).push(w);
       });
       const tree = root.querySelector("#v66SheetTree");
-      tree.innerHTML = [...byYear].map(([year,months],yi) => `<details class="v66-folder" ${yi===0?"open":""}><summary>${year}</summary>${[...months].map(([month,rows],mi)=>`<details class="v66-folder month" ${yi===0&&mi===0?"open":""}><summary>${monthLabels[month]}</summary>${rows.map(w=>`<section class="v66-week" data-year="${w.year}" data-week="${w.week}"><div class="v66-week-head"><button type="button" class="v66-week-open"><span>${weekTitle(w.year,w.week)}</span></button><div class="v66-week-counts"><button type="button" class="active" data-week-filter="received">Fiches reçues <b>${w.sheets.length}</b></button>${canReview||role==="admin"?'<button type="button" data-week-filter="missing">Fiches manquantes <b data-missing-count>…</b></button>':''}</div></div><div class="v66-week-body"></div></section>`).join("")}</details>`).join("")}</details>`).join("");
+      tree.innerHTML = [...byYear].map(([year,months],yi) => `<details class="v66-folder" ${yi===0?"open":""}><summary>${year}</summary>${[...months].map(([month,rows],mi)=>`<details class="v66-folder month" ${yi===0&&mi===0?"open":""}><summary>${monthLabels[month]}</summary>${rows.map(w=>`<section class="v66-week" data-year="${w.year}" data-week="${w.week}"><div class="v66-week-head"><button type="button" class="v66-week-open"><span>${weekTitle(w.year,w.week)}</span></button><div class="v66-week-counts"><button type="button" class="active" data-week-filter="received">Fiches reçues <b>${w.sheets.length}</b></button>${canReview?'<button type="button" data-week-filter="missing">Fiches manquantes <b data-missing-count>…</b></button>':''}</div></div><div class="v66-week-body"></div></section>`).join("")}</details>`).join("")}</details>`).join("");
       const openWeek=async(weekNode,forcedFilter="received")=>{const body=weekNode.querySelector(".v66-week-body"),filter=root.querySelector("#v66SheetFilter");if(forcedFilter&&filter)filter.value=forcedFilter;weekNode.querySelectorAll("[data-week-filter]").forEach(b=>b.classList.toggle("active",b.dataset.weekFilter===forcedFilter));if(!weekNode.classList.contains("open")){weekNode.classList.add("open");await loadWeekRoster(weekNode,body,canReview,role)}else if(forcedFilter&&filter)filter.dispatchEvent(new Event("change"));};
       tree.querySelectorAll(".v66-week-open").forEach(button=>button.onclick=()=>openWeek(button.closest(".v66-week"),"received"));
       tree.querySelectorAll("[data-week-filter]").forEach(button=>button.onclick=()=>openWeek(button.closest(".v66-week"),button.dataset.weekFilter));
-      if(canReview||role==="admin"){(async()=>{for(const node of tree.querySelectorAll(".v66-week")){const{data,error}=await db.rpc("week_timesheet_roster",{target_year:Number(node.dataset.year),target_week:Number(node.dataset.week)});if(error)continue;const missing=(data||[]).filter(r=>r.expected&&!r.timesheet_id).length,target=node.querySelector("[data-missing-count]");if(target)target.textContent=String(missing)}})()}
+      if(canReview){(async()=>{for(const node of tree.querySelectorAll(".v66-week")){const{data,error}=await db.rpc("week_timesheet_roster",{target_year:Number(node.dataset.year),target_week:Number(node.dataset.week)});if(error)continue;const missing=(data||[]).filter(r=>r.expected&&!r.timesheet_id).length,target=node.querySelector("[data-missing-count]");if(target)target.textContent=String(missing)}})()}
       if(intent){const node=tree.querySelector(`[data-year="${intent.year}"][data-week="${intent.week}"]`);if(node){const monthFolder=node.closest("details.month"),yearFolder=monthFolder?.parentElement;monthFolder?.setAttribute("open","");yearFolder?.setAttribute?.("open","");const filter=root.querySelector("#v66SheetFilter"),chosen=intent.filter||"received";if(filter)filter.value=chosen;node.querySelectorAll("[data-week-filter]").forEach(b=>b.classList.toggle("active",b.dataset.weekFilter===chosen));node.classList.add("open");await loadWeekRoster(node,node.querySelector(".v66-week-body"),canReview,role);node.scrollIntoView({behavior:"smooth",block:"center"})}routeIntent=null}
       const employeeMap=new Map();
       (data||[]).forEach(sheet=>{const person=sheet.profiles||{},id=sheet.employee_id;if(!id||employeeMap.has(id))return;employeeMap.set(id,{id,first_name:person.first_name||"",last_name:person.last_name||"",email:person.email||"",name:fullName(person)||person.email||"Salarié"})});
@@ -1242,7 +1254,7 @@ async function boot(db) {
     const year=Number(node.dataset.year), week=Number(node.dataset.week);
     try {
       let rows;
-      if (canReview || role === "admin") {
+      if (canReview) {
         const { data, error } = await db.rpc("week_timesheet_roster", { target_year: year, target_week: week });
         if (error) throw error; rows=data||[];
       } else {
@@ -1287,7 +1299,7 @@ async function boot(db) {
     const modal=el("div",{class:"v66-modal"},'<div class="v66-card"><div class="v66-empty">Chargement de la fiche…</div></div>');document.body.appendChild(modal);
     try{
       const {data:s,error}=await db.from("timesheets").select("id,employee_id,iso_year,iso_week,status,rejection_reason,version,observations,profiles!timesheets_employee_id_fkey(first_name,last_name,email),timesheet_days(id,work_date,day_type,meal,travel_km,it_zone_id,it_zone_label_snapshot,it_needs_review,tasks,manual_task,timesheet_sites(id,project_id,project_code_snapshot,project_name_snapshot,hours))").eq("id",id).single();if(error)throw error;
-      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),warnings=timesheetWarnings(s),editable=canReview&&visibleRole()==="rh",editRows=(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>(d.timesheet_sites||[]).map((x,i)=>`<div class="v66-sheet-row"><span><strong>${i?"":fmtDate(d.work_date)}</strong></span><span>${esc(x.project_code_snapshot||"—")} — ${esc(x.project_name_snapshot||"Chantier non renseigné")}</span><span><input class="v66-inline-input" type="number" min="0" max="24" step="0.5" value="${Number(x.hours||0)}" data-site-hours="${x.id}"></span><span>${i?"":`<input class="v66-inline-input" type="number" min="0" max="1" step="1" value="${Number(d.meal||0)}" data-day-meal="${d.id}">`}</span><span>${i?"":`${Number(d.travel_km||0).toLocaleString("fr-FR")} km`}</span><span>${i?"":`<input class="v66-inline-input" value="${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", "))}" data-day-task="${d.id}">`}</span></div>`).join("")).join("");
+      const hours=(s.timesheet_days||[]).reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((a,x)=>a+Number(x.hours||0),0),0),warnings=timesheetWarnings(s),editable=canReview&&canReviewAllRole(visibleRole()),editRows=(s.timesheet_days||[]).sort((a,b)=>a.work_date.localeCompare(b.work_date)).map(d=>(d.timesheet_sites||[]).map((x,i)=>`<div class="v66-sheet-row"><span><strong>${i?"":fmtDate(d.work_date)}</strong></span><span>${esc(x.project_code_snapshot||"—")} — ${esc(x.project_name_snapshot||"Chantier non renseigné")}</span><span><input class="v66-inline-input" type="number" min="0" max="24" step="0.5" value="${Number(x.hours||0)}" data-site-hours="${x.id}"></span><span>${i?"":`<input class="v66-inline-input" type="number" min="0" max="1" step="1" value="${Number(d.meal||0)}" data-day-meal="${d.id}">`}</span><span>${i?"":`${Number(d.travel_km||0).toLocaleString("fr-FR")} km`}</span><span>${i?"":`<input class="v66-inline-input" value="${esc([...(d.tasks||[]),d.manual_task].filter(Boolean).join(", "))}" data-day-task="${d.id}">`}</span></div>`).join("")).join("");
       modal.classList.add("v66-official-modal");modal.innerHTML=`<article class="v66-card v66-sheet-detail" data-id="${s.id}"><div class="v66-pagehead"><div><h2>Fiche d’heures — ${esc(fullName(s.profiles))}</h2><p>${weekTitle(s.iso_year,s.iso_week)} · ${hours.toLocaleString("fr-FR")} h · ${esc(sheetLabels[s.status]||"Transmise")}</p></div><button class="v66-btn" data-close>Fermer</button></div>${warnings.length?`<div class="v66-sheet-warning"><strong>⚠ Fiche à vérifier</strong><ul>${warnings.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:""}<div class="v66-official-viewport">${officialTimesheetMarkup(s)}</div>${editable?`<details class="v66-edit-sheet"><summary>Modifier cette fiche</summary><div class="v66-full-sheet"><div class="v66-sheet-row v66-sheet-heading"><span>Date</span><span>Chantier</span><span>Heures</span><span>Repas</span><span>IT</span><span>Tâches</span></div>${editRows}</div><label class="v66-field v66-sheet-note">Observations<textarea data-sheet-observations>${esc(s.observations||"")}</textarea></label><div class="v66-actions"><button class="v66-btn primary" data-save-sheet>Enregistrer les modifications RH</button></div></details>`:""}</article>`;fitOfficialSheet(modal);
       modal.querySelector("[data-close]").onclick=()=>modal.remove();modal.onclick=e=>{if(e.target===modal)modal.remove()};
       modal.querySelector("[data-save-sheet]")?.addEventListener("click",async e=>{const button=e.currentTarget;button.disabled=true;try{for(const input of modal.querySelectorAll("[data-site-hours]")){const{error}=await db.from("timesheet_sites").update({hours:Number(input.value)}).eq("id",input.dataset.siteHours);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-meal]")){const{error}=await db.from("timesheet_days").update({meal:Number(input.value)}).eq("id",input.dataset.dayMeal);if(error)throw error}for(const input of modal.querySelectorAll("[data-day-task]")){const{error}=await db.from("timesheet_days").update({manual_task:input.value.trim()}).eq("id",input.dataset.dayTask);if(error)throw error}const{error}=await db.from("timesheets").update({observations:modal.querySelector("[data-sheet-observations]").value}).eq("id",id);if(error)throw error;toast("Modifications RH enregistrées.");modal.remove();appScreen()}catch(err){fail(err);button.disabled=false}});
@@ -1296,7 +1308,7 @@ async function boot(db) {
 
   async function renderSharedSheets(root, canReview) {
     const role = visibleRole();
-    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Validations RH" : role === "admin" ? "Toutes les fiches" : "Fiches de mes chantiers"}</h1><p>${canReview ? "Fiches envoyées, modifiées, validées ou refusées." : role === "admin" ? "Accès technique à toutes les données." : "Lecture seule : identité, heures, repas, IT et tâches."}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
+    root.innerHTML = `<div class="v66-pagehead"><div><h1>${canReview ? "Fiches des salariés" : "Fiches de mes chantiers"}</h1><p>${canReview ? "Consulter, modifier, valider ou refuser les fiches transmises." : "Lecture seule : identité, heures, repas, IT et tâches."}</p></div></div><div class="v66-list" id="v66SharedSheets"><div class="v66-card v66-empty">Chargement…</div></div>`;
     try {
       let query = db
         .from("timesheets")
@@ -1398,7 +1410,7 @@ async function boot(db) {
 
   async function projectModal(project = null) {
     const role = visibleRole(),
-      canAssign = ["rh", "admin"].includes(role);
+      canAssign = canManageProjectsRole(role);
     let conductors = [];
     try {
       if (canAssign) {
@@ -1576,7 +1588,7 @@ async function boot(db) {
       const cumulativeChart=(project,rows)=>{if(!rows.length)return'<div class="v66-empty">Aucune heure enregistrée.</div>';let cumulative=0;const values=rows.map(r=>({label:r.label,value:(cumulative+=r.hours)})),planned=Number(project.planned_hours||0),max=Math.max(planned,...values.map(x=>x.value),1),w=600,h=210,pad=34,points=values.map((x,i)=>`${pad+(i/Math.max(1,values.length-1))*(w-pad*2)},${h-pad-(x.value/max)*(h-pad*2)}`).join(" ");const planY=h-pad-(planned/max)*(h-pad*2);return`<svg class="v105-line-chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="Heures cumulées"><line x1="${pad}" x2="${w-pad}" y1="${planY}" y2="${planY}" class="plan"></line><polyline points="${points}" class="actual"></polyline><text x="${pad}" y="${Math.max(14,planY-7)}" class="label">Prévu ${Math.round(planned)} h</text><text x="${w-pad}" y="${h-8}" text-anchor="end" class="label">Cumul réel ${Math.round(values.at(-1).value)} h</text></svg>`};
 
       const openProject=(project)=>{
-        const all=metrics(project.id,"all",now.getFullYear()),actual=entries.filter(x=>x.projectId===project.id).reduce((s,x)=>s+x.hours,0),planned=Number(project.planned_hours||0),remaining=Math.max(0,planned-actual),health=v105Health(project,actual),timePct=v105ProjectTimePct(project),hoursPct=planned?actual/planned*100:null,proj=projection(project,actual),projectRows=entries.filter(x=>x.projectId===project.id),peopleMap=new Map();projectRows.forEach(x=>{const p=peopleMap.get(x.employeeId)||{name:x.name,hours:0};p.hours+=x.hours;peopleMap.set(x.employeeId,p)});const people=[...peopleMap.values()].sort((a,b)=>b.hours-a.hours),days=dailyForProject(project.id),dayRows=[...days.entries()],effectifs=dayRows.map(([,d])=>d.employees.size),avgEffectif=effectifs.length?effectifs.reduce((a,b)=>a+b,0)/effectifs.length:0,maxEffectif=effectifs.length?Math.max(...effectifs):0,weekly=weeklyForProject(project.id),peak=weekly.reduce((best,row)=>!best||row.hours>best.hours?row:best,null),projectIt=itEntries.filter(x=>x.projectId===project.id),itTotal=projectIt.reduce((s,x)=>s+x.km,0),itAvg=projectIt.length?itTotal/projectIt.length:0,first=projectRows.map(x=>x.date).sort()[0],last=projectRows.map(x=>x.date).sort().at(-1),canSeePeople=["conducteur","rh","admin"].includes(visibleRole());
+        const all=metrics(project.id,"all",now.getFullYear()),actual=entries.filter(x=>x.projectId===project.id).reduce((s,x)=>s+x.hours,0),planned=Number(project.planned_hours||0),remaining=Math.max(0,planned-actual),health=v105Health(project,actual),timePct=v105ProjectTimePct(project),hoursPct=planned?actual/planned*100:null,proj=projection(project,actual),projectRows=entries.filter(x=>x.projectId===project.id),peopleMap=new Map();projectRows.forEach(x=>{const p=peopleMap.get(x.employeeId)||{name:x.name,hours:0};p.hours+=x.hours;peopleMap.set(x.employeeId,p)});const people=[...peopleMap.values()].sort((a,b)=>b.hours-a.hours),days=dailyForProject(project.id),dayRows=[...days.entries()],effectifs=dayRows.map(([,d])=>d.employees.size),avgEffectif=effectifs.length?effectifs.reduce((a,b)=>a+b,0)/effectifs.length:0,maxEffectif=effectifs.length?Math.max(...effectifs):0,weekly=weeklyForProject(project.id),peak=weekly.reduce((best,row)=>!best||row.hours>best.hours?row:best,null),projectIt=itEntries.filter(x=>x.projectId===project.id),itTotal=projectIt.reduce((s,x)=>s+x.km,0),itAvg=projectIt.length?itTotal/projectIt.length:0,first=projectRows.map(x=>x.date).sort()[0],last=projectRows.map(x=>x.date).sort().at(-1),canSeePeople=canSeeProjectPeopleRole(visibleRole());
         const gap=hoursPct===null?null:hoursPct-timePct;
         root.innerHTML=`<article class="v105-project-detail"><div class="v105-detail-top"><button type="button" class="v66-btn" data-detail-back>← Retour</button><button type="button" class="v66-btn" data-detail-edit>Modifier le chantier</button></div><header class="v105-detail-hero"><div><span class="v105-eyebrow">${esc(project.code)}</span><h1>${esc(project.name)}</h1><div class="v105-project-meta"><span>👤 ${esc(conductor(project))}</span><span>📅 ${fmtDate(project.planned_start_date)} → ${fmtDate(project.planned_end_date)}</span></div></div><div><span class="v66-pill ${projectTimeCategory(project)}">${projectCategoryLabels[projectTimeCategory(project)]}</span><span class="v105-health ${health.tone}"><i></i>${esc(health.label)}</span></div></header><nav class="v105-detail-tabs"><button class="active" data-detail-tab="overview">Vue d’ensemble</button><button data-detail-tab="team">Équipe</button><button data-detail-tab="activity">Activité</button><button data-detail-tab="it">IT</button></nav><div id="v105DetailBody"></div></article>`;
         const body=root.querySelector("#v105DetailBody");
@@ -1602,7 +1614,7 @@ async function boot(db) {
           const fairNote=hasCurrent?`Comparaison équitable du 1er janvier au ${now.toLocaleDateString("fr-FR",{day:"numeric",month:"long"})} pour les deux années.`:`Comparaison sur les deux années complètes.`;
           const top=(data)=>[...data.byProject.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5);
           const topPeople=(data)=>data.employeeRanking.slice(0,5);
-          const canSeePeople=["conducteur","rh","admin"].includes(visibleRole());
+          const canSeePeople=canSeeProjectPeopleRole(visibleRole());
           const monthRows=monthLabels.map((label,i)=>({label,a:A.buckets.get(label)||0,b:B.buckets.get(label)||0})).filter(r=>r.a||r.b);
           const maxMonthly=Math.max(1,...monthRows.flatMap(r=>[r.a,r.b]));
           stats.querySelector("#v105CompareResults").innerHTML=`<section class="v105-compare-summary"><div><small>Année A</small><strong>${esc(A.period.label)}</strong></div><span>VS</span><div><small>Année B</small><strong>${esc(B.period.label)}</strong></div></section><div class="v107-fair-note">${esc(fairNote)}</div><div class="v105-compare-grid">${items.map(([label,a,b,u])=>`<article><small>${label}</small><div><strong>${u==="h"?fmt(a):Number(a).toLocaleString("fr-FR",{maximumFractionDigits:1})}</strong><span>${delta(a,b,u?" h":" ")}</span></div><p>contre ${u==="h"?fmt(b):Number(b).toLocaleString("fr-FR",{maximumFractionDigits:1})}</p></article>`).join("")}</div>${monthRows.length?`<section class="v66-card v107-year-trend"><div class="v105-card-head"><div><span class="v105-card-icon">↗</span><h3>Évolution mois par mois</h3></div><small>${aYear} vs ${bYear}</small></div><div class="v107-month-compare">${monthRows.map(r=>`<div class="v107-month-row"><b>${esc(r.label)}</b><div><i style="width:${Math.max(r.a?2:0,r.a/maxMonthly*100)}%"></i><span>${fmt(r.a)}</span></div><div><i style="width:${Math.max(r.b?2:0,r.b/maxMonthly*100)}%"></i><span>${fmt(r.b)}</span></div></div>`).join("")}</div><div class="v107-legend"><span><i></i>${aYear}</span><span><i></i>${bYear}</span></div></section>`:""}<section class="v105-two-col"><article class="v66-card"><div class="v105-card-head"><h3>Top 5 chantiers — ${aYear}</h3></div><div class="v105-ranking">${top(A).map(([id,h],i)=>{const p=projects.find(x=>x.id===id);return p?`<div><b>${i+1}</b><span>${esc(p.name)}</span><strong>${fmt(h)}</strong></div>`:""}).join("")||'<div class="v66-empty">Aucune donnée.</div>'}</div></article><article class="v66-card"><div class="v105-card-head"><h3>Top 5 chantiers — ${bYear}</h3></div><div class="v105-ranking">${top(B).map(([id,h],i)=>{const p=projects.find(x=>x.id===id);return p?`<div><b>${i+1}</b><span>${esc(p.name)}</span><strong>${fmt(h)}</strong></div>`:""}).join("")||'<div class="v66-empty">Aucune donnée.</div>'}</div></article></section>${canSeePeople?`<section class="v105-two-col"><article class="v66-card"><div class="v105-card-head"><h3>Salariés les plus mobilisés — ${aYear}</h3></div><div class="v105-ranking">${topPeople(A).map((r,i)=>`<div><b>${i+1}</b><span>${esc(r.name)}</span><strong>${fmt(r.hours)}</strong></div>`).join("")||'<div class="v66-empty">Aucune donnée.</div>'}</div></article><article class="v66-card"><div class="v105-card-head"><h3>Salariés les plus mobilisés — ${bYear}</h3></div><div class="v105-ranking">${topPeople(B).map((r,i)=>`<div><b>${i+1}</b><span>${esc(r.name)}</span><strong>${fmt(r.hours)}</strong></div>`).join("")||'<div class="v66-empty">Aucune donnée.</div>'}</div></article></section>`:""}`;
@@ -1616,7 +1628,7 @@ async function boot(db) {
   }
 
   async function renderLegacy(root) {
-    const role=visibleRole(),canSeeEmployees=["conducteur","rh","admin"].includes(role),now=currentIsoWeek();
+    const role=visibleRole(),canSeeEmployees=canSeeEmployeeSheetsRole(role),now=currentIsoWeek();
     localStorage.setItem("antras_selected_year_v1",String(now.year));
     const yearOptions=Array.from({length:81},(_,i)=>2020+i).map(year=>`<option value="${year}" ${year===now.year?"selected":""}>${year}</option>`).join(""),weekOptions=Array.from({length:53},(_,i)=>i+1).map(week=>`<option value="${week}" ${week===now.week?"selected":""}>Semaine ${week}</option>`).join("");
     root.innerHTML = `<div class="v66-pagehead"><div><h1>Fiches d’heures</h1><p>Choisis une semaine ou complète directement la semaine actuelle.</p></div><div class="v66-actions"><button class="v66-btn" id="v66SavedSheets">Mes fiches enregistrées</button>${canSeeEmployees?'<button class="v66-btn" id="v66EmployeeSheets">Fiches d’heures salariés</button>':''}</div></div><section class="v66-card v66-week-picker"><button type="button" class="v66-btn" id="v66PreviousWeek" aria-label="Semaine précédente">‹</button><label>Année<select id="v66TimesheetYear">${yearOptions}</select></label><label>Semaine<select id="v66TimesheetWeek">${weekOptions}</select></label><button type="button" class="v66-btn primary" id="v66ShowTimesheet">Afficher la semaine</button><button type="button" class="v66-btn" id="v66CurrentWeek">Semaine actuelle</button><button type="button" class="v66-btn" id="v66NextWeek" aria-label="Semaine suivante">›</button></section><div class="v66-info" id="v66SyncMessage">En ligne : Enregistrer la fiche la partage automatiquement avec le bureau.</div><section id="v66CurrentSheetPanel" class="v66-native-editor"><div class="v66-card v66-empty">Chargement de la fiche actuelle…</div></section><section id="v66SavedSheetsPanel" hidden><div class="v66-filterbar"><input class="v66-search" id="v66MySheetSearch" placeholder="Rechercher une année, un mois, une semaine ou un statut…"></div><div class="v66-list" id="v66MySheets"><div class="v66-card v66-empty">Chargement de l’index…</div></div></section>${canSeeEmployees?'<section id="v66EmployeeSheetsPanel" hidden></section>':''}`;
@@ -1628,7 +1640,7 @@ async function boot(db) {
       const shiftWeek=delta=>{const year=Number(root.querySelector("#v66TimesheetYear").value),week=Number(root.querySelector("#v66TimesheetWeek").value),date=new Date(isoWeekBounds(year,week).monday);date.setUTCDate(date.getUTCDate()+delta*7);const target=isoWeekFromDate(date);openWeek(target.year,target.week)};root.querySelector("#v66PreviousWeek").onclick=()=>shiftWeek(-1);root.querySelector("#v66NextWeek").onclick=()=>shiftWeek(1);
       const hidePanels=()=>{root.querySelector("#v66CurrentSheetPanel").hidden=true;root.querySelector("#v66SavedSheetsPanel").hidden=true;const employee=root.querySelector("#v66EmployeeSheetsPanel");if(employee)employee.hidden=true};
       root.querySelector("#v66SavedSheets").onclick=()=>{const panel=root.querySelector("#v66SavedSheetsPanel"),opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening)panel.scrollIntoView({behavior:"smooth",block:"start"});else root.querySelector("#v66CurrentSheetPanel").hidden=false};
-      const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;const opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening){await renderSheetExplorer(panel,role==="rh");panel.scrollIntoView({behavior:"smooth",block:"start"})}else root.querySelector("#v66CurrentSheetPanel").hidden=false};
+      const showEmployees=async()=>{const panel=root.querySelector("#v66EmployeeSheetsPanel");if(!panel)return;const opening=panel.hidden;hidePanels();panel.hidden=!opening;if(opening){await renderSheetExplorer(panel,canReviewAllRole(role));panel.scrollIntoView({behavior:"smooth",block:"start"})}else root.querySelector("#v66CurrentSheetPanel").hidden=false};
       root.querySelector("#v66EmployeeSheets")?.addEventListener("click",showEmployees);
       if(intent?.employeeSheets)await showEmployees();else routeIntent=null;
     } catch (e) {
@@ -1748,7 +1760,7 @@ async function boot(db) {
     // Un conducteur reste aussi un salarié de l'entreprise : il doit pouvoir
     // synchroniser et envoyer ses propres fiches tout en conservant ses droits
     // supplémentaires sur les chantiers.
-    if (!["salarie", "conducteur", "rh", "admin"].includes(profile.role)) return 0;
+    if (!["salarie", "conducteur", ...executiveRoles].includes(profile.role)) return 0;
     const sheets = localSheets(), stateKey="antras_sync_state_v3";
     if (!sheets.length) return 0;
     let state={};try{state=JSON.parse(localStorage.getItem(stateKey)||"{}")||{}}catch{}

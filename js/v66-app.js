@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=112", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=113", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -478,10 +478,43 @@ async function boot(db) {
         dashboard.querySelectorAll("[data-go-sheets]").forEach(b=>b.onclick=()=>navigateTo("legacy",{employeeSheets:true}));
         dashboard.querySelector("[data-go-leaves]")?.addEventListener("click",()=>navigateTo("leaves"));
       } else {
-        const now=currentIsoWeek(),{data,error}=await db.from("timesheets").select("id,status,iso_year,iso_week").eq("employee_id",profile.id).eq("iso_year",now.year).eq("iso_week",now.week).maybeSingle();if(error)throw error;
-        const editable=!data||["draft","rejected","changed_after_validation"].includes(data.status),label=!data?"Remplir ma fiche":editable?"Continuer ma fiche":"Voir ma fiche";
-        dashboard.innerHTML=`<button class="v66-action-card v66-primary-action" id="v66HomeSheet"><span>${esc(weekTitle(now.year,now.week))}</span><strong>${esc(label)}</strong><small>${data?esc(sheetLabels[data.status]||data.status):"Aucune fiche commencée"}</small></button>`;
+        const now=currentIsoWeek(), today=new Date().toISOString().slice(0,10);
+        const [{data:current,error:currentError},{data:recent,error:recentError},{data:leaves,error:leaveError}] = await Promise.all([
+          db.from("timesheets").select("id,status,iso_year,iso_week,rejection_reason,submitted_at,timesheet_days(work_date,travel_km,it_needs_review,timesheet_sites(project_id,project_code_snapshot,project_name_snapshot,hours))").eq("employee_id",profile.id).eq("iso_year",now.year).eq("iso_week",now.week).maybeSingle(),
+          db.from("timesheets").select("id,status,iso_year,iso_week,submitted_at").eq("employee_id",profile.id).order("iso_year",{ascending:false}).order("iso_week",{ascending:false}).limit(4),
+          db.from("leave_requests").select("id,status,leave_type,created_at,leave_periods(start_date,end_date,requested_days,leave_type,duration_type)").eq("employee_id",profile.id).order("created_at",{ascending:false}).limit(10)
+        ]);
+        if(currentError)throw currentError;if(recentError)throw recentError;if(leaveError)throw leaveError;
+        const editable=!current||["draft","rejected","changed_after_validation"].includes(current.status),label=!current?"Remplir ma fiche":editable?"Continuer ma fiche":"Voir ma fiche";
+        const days=current?.timesheet_days||[];
+        const totalHours=days.reduce((sum,d)=>sum+(d.timesheet_sites||[]).reduce((n,x)=>n+Number(x.hours||0),0),0);
+        const projectKeys=new Set(), projectNames=[];
+        days.forEach(d=>(d.timesheet_sites||[]).forEach(x=>{if(Number(x.hours||0)<=0)return;const key=x.project_id||`${x.project_code_snapshot||""}-${x.project_name_snapshot||""}`;if(key&&!projectKeys.has(key)){projectKeys.add(key);projectNames.push(x.project_name_snapshot||x.project_code_snapshot||"Chantier")}}));
+        const totalIt=days.reduce((sum,d)=>sum+Number(d.travel_km||0),0), itWarnings=days.filter(d=>d.it_needs_review).length;
+        const leaveRows=leaves||[], nextLeave=leaveRows.filter(r=>r.status==="approved"&&(r.leave_periods||[]).some(p=>(p.end_date||p.start_date)>=today)).sort((a,b)=>{const da=(a.leave_periods||[]).map(p=>p.start_date).sort()[0]||"9999";const dbb=(b.leave_periods||[]).map(p=>p.start_date).sort()[0]||"9999";return da.localeCompare(dbb)})[0]||null;
+        const lastLeave=leaveRows[0]||null;
+        const leaveSummary=r=>{if(!r)return null;const ps=r.leave_periods||[],starts=ps.map(p=>p.start_date).filter(Boolean).sort(),ends=ps.map(p=>p.end_date||p.start_date).filter(Boolean).sort(),total=ps.reduce((n,p)=>n+Number(p.requested_days||0),0),types=new Set(ps.map(p=>p.leave_type||r.leave_type));return{start:starts[0]||"",end:ends.at(-1)||"",total,type:types.size>1?"Congés + RTT":leaveTypeLabels[[...types][0]||r.leave_type]||"Absence"}};
+        const nextSummary=leaveSummary(nextLeave), lastSummary=leaveSummary(lastLeave);
+        const attention=[];
+        if(!current)attention.push({tone:"warning",title:"Fiche de la semaine à remplir",text:"Ta fiche n’est pas encore commencée.",go:"sheet"});
+        else if(current.status==="rejected")attention.push({tone:"danger",title:"Fiche refusée",text:current.rejection_reason||"Une correction est demandée avant un nouvel envoi.",go:"sheet"});
+        else if(current.status==="changed_after_validation")attention.push({tone:"warning",title:"Fiche à renvoyer",text:"Des modifications ont été faites après validation.",go:"sheet"});
+        else if(current.status==="draft")attention.push({tone:"warning",title:"Fiche en brouillon",text:"Pense à l’envoyer au bureau quand elle est terminée.",go:"sheet"});
+        if(itWarnings)attention.push({tone:"warning",title:"IT à vérifier",text:`${itWarnings} journée${itWarnings>1?"s":""} avec un IT modifié ou particulier.`,go:"sheet"});
+        if(lastLeave?.status==="rejected")attention.push({tone:"danger",title:"Demande d’absence refusée",text:lastSummary?`${lastSummary.type} · ${fmtDate(lastSummary.start)}`:"Consulte le détail de la demande.",go:"leaves"});
+        dashboard.innerHTML=`
+          <section class="v113-employee-hero v66-dashboard-wide"><div><span class="v112-eyebrow">MON ESPACE</span><h2>${esc(weekTitle(now.year,now.week))}</h2><p>Retrouve ici ta fiche, tes absences et ce qui demande ton attention.</p></div><span class="v113-hero-date">${new Date().toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})}</span></section>
+          <button class="v113-sheet-card" id="v66HomeSheet"><div class="v113-card-head"><span>MA FICHE CETTE SEMAINE</span><b class="v66-pill ${esc(current?.status||"draft")}">${esc(current?sheetLabels[current.status]||current.status:"À remplir")}</b></div><strong>${esc(label)}</strong><p>${current?`${v105FmtHours(totalHours)} saisies · ${projectKeys.size} chantier${projectKeys.size>1?"s":""}`:"Aucune fiche commencée pour le moment."}</p><div class="v113-sheet-bottom"><span>${projectNames.slice(0,2).map(esc).join(" · ")||"Ouvrir la fiche d’heures"}</span><i>›</i></div></button>
+          <section class="v66-card v113-week-summary"><div class="v112-section-head"><div><h2>Cette semaine</h2><p>Résumé de ta fiche actuelle</p></div></div><div class="v113-mini-kpis"><div><small>Heures</small><strong>${v105FmtHours(totalHours)}</strong></div><div><small>Chantiers</small><strong>${projectKeys.size}</strong></div><div><small>IT déclaré</small><strong>${Math.round(totalIt).toLocaleString("fr-FR")} km</strong></div></div></section>
+          <button class="v66-card v113-leave-card" data-go-leaves><div class="v112-section-head"><div><h2>Congés & RTT</h2><p>${nextLeave?"Ta prochaine absence acceptée":"Tes demandes d’absence"}</p></div><span class="v113-arrow">›</span></div>${nextLeave&&nextSummary?`<div class="v113-next-leave"><b>${esc(nextSummary.type)}</b><strong>${nextSummary.start===nextSummary.end?fmtDate(nextSummary.start):`Du ${fmtDate(nextSummary.start)} au ${fmtDate(nextSummary.end)}`}</strong><small>${nextSummary.total.toLocaleString("fr-FR")} jour${nextSummary.total>1?"s":""}</small></div>`:lastLeave&&lastSummary?`<div class="v113-next-leave"><b>${esc(lastSummary.type)}</b><strong>${esc(leaveStatusLabels[lastLeave.status]||lastLeave.status)}</strong><small>${fmtDate(lastSummary.start)}</small></div>`:`<div class="v113-empty-line">Aucune demande récente. <b>Faire une demande ›</b></div>`}</button>
+          <section class="v66-card v113-attention"><div class="v112-section-head"><div><h2>À faire</h2><p>Les actions importantes apparaissent ici.</p></div></div>${attention.length?`<div class="v113-task-list">${attention.slice(0,4).map((a,i)=>`<button class="v113-task ${a.tone}" data-task-go="${a.go}"><span>${a.tone==="danger"?"!":"•"}</span><div><strong>${esc(a.title)}</strong><small>${esc(a.text)}</small></div><i>›</i></button>`).join("")}</div>`:`<div class="v113-all-good"><span>✓</span><div><strong>Rien à signaler</strong><small>Tu n’as aucune action urgente pour le moment.</small></div></div>`}</section>
+          <section class="v66-card v113-recent v66-dashboard-wide"><div class="v112-section-head"><div><h2>Mes dernières fiches</h2><p>Accès rapide aux semaines précédentes.</p></div><button class="v66-btn" data-go-all-sheets>Voir toutes mes fiches</button></div><div class="v113-recent-grid">${(recent||[]).length?(recent||[]).map(s=>`<button data-recent-year="${s.iso_year}" data-recent-week="${s.iso_week}"><span><strong>${esc(weekTitle(s.iso_year,s.iso_week))}</strong><small>${s.submitted_at?`Envoyée le ${new Date(s.submitted_at).toLocaleDateString("fr-FR")}`:"Fiche enregistrée"}</small></span><span class="v66-pill ${esc(s.status)}">${esc(sheetLabels[s.status]||s.status)}</span><i>›</i></button>`).join(""):'<div class="v113-empty-line">Aucune fiche enregistrée pour le moment.</div>'}</div></section>`;
         dashboard.querySelector("#v66HomeSheet").onclick=()=>navigateTo("legacy",{year:now.year,week:now.week,open:true});
+        dashboard.querySelector("[data-go-leaves]")?.addEventListener("click",()=>navigateTo("leaves"));
+        dashboard.querySelectorAll('[data-task-go="sheet"]').forEach(b=>b.onclick=()=>navigateTo("legacy",{year:now.year,week:now.week,open:true}));
+        dashboard.querySelectorAll('[data-task-go="leaves"]').forEach(b=>b.onclick=()=>navigateTo("leaves"));
+        dashboard.querySelector("[data-go-all-sheets]")?.addEventListener("click",()=>navigateTo("legacy",{mySheets:true}));
+        dashboard.querySelectorAll("[data-recent-year]").forEach(b=>b.onclick=()=>navigateTo("legacy",{year:Number(b.dataset.recentYear),week:Number(b.dataset.recentWeek),open:true}));
       }
     } catch(e){dashboard.innerHTML=`<div class="v66-card v66-empty">Impossible de charger le tableau de bord : ${esc(e.message)}</div>`}
   }

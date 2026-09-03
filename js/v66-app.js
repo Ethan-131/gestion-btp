@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=113", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=114", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -946,10 +946,68 @@ async function boot(db) {
         const paintGroups=()=>{const q=normalizeSearch(query),rows=tabRows[activeTab].filter(r=>smartSearchMatch(fullName(r.profiles),q)&&(typeFilter==="all"||(r.leave_periods||[]).some(p=>(p.leave_type||r.leave_type)===typeFilter))&&overlapsSelectedPeriod(r));list.querySelectorAll("[data-leave-tab]").forEach(button=>button.classList.toggle("active",button.dataset.leaveTab===activeTab));groupsNode.innerHTML=rows.length?rows.map(r=>{const s=requestSummary(r),created=new Date(r.created_at).toLocaleDateString("fr-FR");return`<button type="button" class="v66-leave-row" data-request-id="${r.id}"><span class="v66-avatar small">${esc(`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase())}</span><span class="v66-leave-row-person"><strong>${esc(fullName(r.profiles))}</strong><small>${s.start===s.end?fmtDate(s.start):`Du ${fmtDate(s.start)} au ${fmtDate(s.end)}`}</small></span><span class="v66-leave-row-types">${s.cp?`<b class="is-cp">${s.cp.toLocaleString("fr-FR")} CP</b>`:""}${s.rtt?`<b class="is-rtt">${s.rtt.toLocaleString("fr-FR")} RTT</b>`:""}</span><span class="v66-leave-row-date">Demandée le ${created}</span><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span><i>›</i></button>`}).join(""):'<div class="v66-empty">Aucune demande pour cette période.</div>';groupsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)))};
         list.querySelectorAll("[data-leave-tab]").forEach(button=>button.onclick=()=>{activeTab=button.dataset.leaveTab;paintGroups()});list.querySelector("#v66LeaveSearch").oninput=e=>{query=e.target.value;paintGroups()};list.querySelector("#v66LeaveTypeFilter").onchange=e=>{typeFilter=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodMonth").onchange=e=>{periodMonth=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodYear").onchange=e=>{periodYear=e.target.value;paintGroups()};list.querySelector("#v66LeaveCurrentPeriod").onclick=()=>{const now=new Date();periodMonth=String(now.getMonth());periodYear=String(now.getFullYear());list.querySelector("#v66LeavePeriodMonth").value=periodMonth;list.querySelector("#v66LeavePeriodYear").value=periodYear;paintGroups()};paintGroups();
       } else {
-        list.innerHTML = requests.length
-          ? requests.map(cardHtml).join("")
-          : '<div class="v66-card v66-empty">Aucune demande pour le moment.</div>';
-        list.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)));
+        const myRequests = requests.filter(r => r.employee_id === effectiveUserId());
+        let activeStatus = "all", periodMonth = "all", periodYear = "all", typeFilter = "all", sortOrder = "desc";
+        const currentYear = new Date().getFullYear();
+        const filterYears = Array.from({ length: Math.max(1, currentYear - 2024 + 1) }, (_, index) => currentYear - index);
+        const statusTabs = [
+          ["all", "Toutes"],
+          ["pending", "En attente"],
+          ["approved", "Acceptées"],
+          ["cancellation_requested", "Annulation demandée"],
+          ["cancelled", "Annulées"],
+          ["rejected", "Refusées"],
+        ];
+        const countFor = status => status === "all" ? myRequests.length : myRequests.filter(r => r.status === status).length;
+        list.innerHTML = `<section class="v114-my-leaves">
+          <div class="v66-leave-tabs v114-my-leave-tabs" role="tablist">
+            ${statusTabs.map(([status,label])=>`<button type="button" data-my-leave-status="${status}" class="${status==="all"?"active":""}">${label} <b>${countFor(status)}</b></button>`).join("")}
+          </div>
+          <div class="v66-leave-toolbar v66-leave-toolbar-period v114-my-leave-toolbar">
+            <select id="v114MyLeaveMonth" aria-label="Filtrer par mois"><option value="all">Tous les mois</option>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select>
+            <select id="v114MyLeaveYear" aria-label="Filtrer par année"><option value="all">Toutes les années</option>${filterYears.map(year=>`<option value="${year}">${year}</option>`).join("")}</select>
+            <select id="v114MyLeaveType" aria-label="Filtrer par type"><option value="all">CP + RTT</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select>
+            <select id="v114MyLeaveSort" aria-label="Ordre d’affichage"><option value="desc">Plus récentes d’abord</option><option value="asc">Plus anciennes d’abord</option></select>
+            <button type="button" class="v66-btn" id="v114MyLeaveReset">Réinitialiser</button>
+          </div>
+          <div class="v114-my-leave-summary" id="v114MyLeaveSummary"></div>
+          <div class="v114-my-leave-list" id="v114MyLeaveList"></div>
+        </section>`;
+        const rowsNode = list.querySelector("#v114MyLeaveList");
+        const summaryNode = list.querySelector("#v114MyLeaveSummary");
+        const overlapsSelectedPeriod = r => {
+          if (periodMonth === "all" && periodYear === "all") return true;
+          return (r.leave_periods || []).some(period => {
+            const start = new Date(`${period.start_date}T12:00:00`), end = new Date(`${period.end_date}T12:00:00`);
+            if (periodYear !== "all" && periodMonth === "all") return start.getFullYear() <= Number(periodYear) && end.getFullYear() >= Number(periodYear);
+            if (periodYear === "all") {
+              const cursor = new Date(start.getFullYear(), start.getMonth(), 1, 12), lastMonth = new Date(end.getFullYear(), end.getMonth(), 1, 12);
+              while (cursor <= lastMonth) { if (cursor.getMonth() === Number(periodMonth)) return true; cursor.setMonth(cursor.getMonth() + 1); }
+              return false;
+            }
+            const rangeStart = new Date(Number(periodYear), Number(periodMonth), 1, 12), rangeEnd = new Date(Number(periodYear), Number(periodMonth) + 1, 0, 12);
+            return start <= rangeEnd && end >= rangeStart;
+          });
+        };
+        const matchesType = r => typeFilter === "all" || (r.leave_periods || []).some(p => (p.leave_type || r.leave_type) === typeFilter);
+        const requestDate = r => requestSummary(r).start || String(r.created_at || "").slice(0,10);
+        const paintMyRequests = () => {
+          list.querySelectorAll("[data-my-leave-status]").forEach(button=>button.classList.toggle("active", button.dataset.myLeaveStatus === activeStatus));
+          const rows = myRequests
+            .filter(r => (activeStatus === "all" || r.status === activeStatus) && matchesType(r) && overlapsSelectedPeriod(r))
+            .sort((a,b) => sortOrder === "asc" ? requestDate(a).localeCompare(requestDate(b)) : requestDate(b).localeCompare(requestDate(a)));
+          const periodLabel = periodYear !== "all" ? `${periodMonth !== "all" ? monthLabels[Number(periodMonth)] + " " : ""}${periodYear}` : periodMonth !== "all" ? monthLabels[Number(periodMonth)] : "toutes les périodes";
+          summaryNode.innerHTML = `<span><strong>${rows.length}</strong> demande${rows.length>1?"s":""}</span><small>${esc(periodLabel)}</small>`;
+          rowsNode.innerHTML = rows.length ? rows.map(cardHtml).join("") : '<div class="v66-card v66-empty">Aucune demande ne correspond à ces filtres.</div>';
+          rowsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(myRequests.find(r=>r.id===button.dataset.requestId)));
+        };
+        list.querySelectorAll("[data-my-leave-status]").forEach(button=>button.onclick=()=>{activeStatus=button.dataset.myLeaveStatus;paintMyRequests()});
+        list.querySelector("#v114MyLeaveMonth").onchange=e=>{periodMonth=e.target.value;paintMyRequests()};
+        list.querySelector("#v114MyLeaveYear").onchange=e=>{periodYear=e.target.value;paintMyRequests()};
+        list.querySelector("#v114MyLeaveType").onchange=e=>{typeFilter=e.target.value;paintMyRequests()};
+        list.querySelector("#v114MyLeaveSort").onchange=e=>{sortOrder=e.target.value;paintMyRequests()};
+        list.querySelector("#v114MyLeaveReset").onclick=()=>{activeStatus="all";periodMonth="all";periodYear="all";typeFilter="all";sortOrder="desc";list.querySelector("#v114MyLeaveMonth").value="all";list.querySelector("#v114MyLeaveYear").value="all";list.querySelector("#v114MyLeaveType").value="all";list.querySelector("#v114MyLeaveSort").value="desc";paintMyRequests()};
+        paintMyRequests();
       }
       function bindLeaveActions(scope=list) {
       scope.querySelectorAll("[data-leave-decision]").forEach(

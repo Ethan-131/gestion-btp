@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=110", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=111", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -761,7 +761,7 @@ async function boot(db) {
       const { data, error } = await db
         .from("leave_requests")
         .select(
-          "*,profiles!leave_requests_employee_id_fkey(first_name,last_name,email),leave_periods(*)",
+          "*,profiles!leave_requests_employee_id_fkey(first_name,last_name,email,role),leave_periods(*)",
         )
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -796,46 +796,34 @@ async function boot(db) {
         );
       paintCalendar();
       const list = root.querySelector("#v66LeaveList");
+      const requestSummary=r=>{const periods=r.leave_periods||[],cp=periods.filter(p=>(p.leave_type||r.leave_type)==="paid_leave").reduce((sum,p)=>sum+Number(p.requested_days||0),0),rtt=periods.filter(p=>(p.leave_type||r.leave_type)==="rtt").reduce((sum,p)=>sum+Number(p.requested_days||0),0),starts=periods.map(p=>p.start_date).sort(),ends=periods.map(p=>p.end_date).sort();return{cp,rtt,start:starts[0]||"",end:ends.at(-1)||"",total:cp+rtt}};
+      const longDate=value=>value?new Date(`${value}T12:00:00Z`).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"UTC"}):"—";
+      const longDateTime=value=>value?new Date(value).toLocaleString("fr-FR",{day:"numeric",month:"long",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—";
+      const leaveDrawerActions=r=>{
+        const own=r.employee_id===profile.id;
+        if(canReview&&r.status==="pending")return '<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>';
+        if(canReview&&r.status==="cancellation_requested")return '<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>';
+        if(own&&!canReview&&r.status==="pending")return '<button class="v66-btn danger" data-leave-cancel="cancelled">Annuler la demande</button>';
+        if(own&&!canReview&&r.status==="approved")return '<button class="v66-btn danger" data-leave-cancel="cancellation_requested">Demander l’annulation</button>';
+        return "";
+      };
+      const openRequest=r=>{
+        const summary=requestSummary(r),own=r.employee_id===profile.id,initials=`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase(),periods=(r.leave_periods||[]).sort((a,b)=>(a.start_date||"").localeCompare(b.start_date||"")),actions=leaveDrawerActions(r),showType=role!=="conducteur"||own,primaryType=summary.cp&&summary.rtt?"Congés payés + RTT":summary.rtt?"RTT":summary.cp?"Congés payés":showType?(leaveTypeLabels[r.leave_type]||"Absence"):"Absence",createdLabel=longDateTime(r.created_at),updatedLabel=longDateTime(r.updated_at),roleLabel=roleLabels[r.profiles?.role]||"Salarié",statusLabel=leaveStatusLabels[r.status]||r.status;
+        const history=[`<div class="v111-history-item is-done"><span></span><div><strong>Demande envoyée</strong><small>${esc(createdLabel)}</small></div></div>`];
+        if(r.status!=="pending"&&r.updated_at&&r.updated_at!==r.created_at){const eventLabel=r.status==="approved"?"Demande acceptée":r.status==="rejected"?"Demande refusée":r.status==="cancellation_requested"?"Annulation demandée":r.status==="cancelled"?"Absence annulée":"Demande mise à jour";history.push(`<div class="v111-history-item is-current"><span></span><div><strong>${esc(eventLabel)}</strong><small>${esc(updatedLabel)}</small></div></div>`)}
+        const drawer=el("div",{class:"v66-drawer-overlay"},`<article class="v66-side-drawer v66-leave-drawer v111-leave-drawer" data-id="${r.id}"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(r.profiles))}</h2><small>${esc(roleLabel)}</small><span class="v66-pill ${esc(r.status)}">${esc(statusLabel)}</span></div></div><button type="button" class="v66-icon-button" data-close aria-label="Fermer">×</button></header><main><section class="v111-leave-summary"><div class="v111-leave-summary-top"><span class="v111-leave-type ${summary.rtt&&!summary.cp?"is-rtt":"is-cp"}">${esc(primaryType)}</span><span class="v66-pill ${esc(r.status)}">${esc(statusLabel)}</span></div><strong>${summary.start===summary.end?longDate(summary.start):`Du ${longDate(summary.start)} au ${longDate(summary.end)}`}</strong><div class="v111-summary-grid"><div><small>Durée</small><b>${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</b></div><div><small>Demandée le</small><b>${esc(createdLabel)}</b></div>${r.created_by_rh?'<div><small>Origine</small><b>Créée par RH / Direction</b></div>':''}</div></section><section><div class="v111-section-title"><h3>Détail des journées</h3><span>${periods.length} période${periods.length>1?"s":""}</span></div><div class="v66-drawer-days">${periods.map(p=>`<div><span><strong>${p.start_date===p.end_date?longDate(p.start_date):`${longDate(p.start_date)} → ${longDate(p.end_date)}`}</strong>${p.duration_type!=="full"?`<small>${p.duration_type==="morning"?"Matin":"Après-midi"}</small>`:'<small>Journée complète</small>'}</span><b class="${(p.leave_type||r.leave_type)==="rtt"?"is-rtt":"is-cp"}">${esc(showType?(leaveTypeLabels[p.leave_type||r.leave_type]||"Absence"):"Absence")}</b></div>`).join("")}</div></section><section><div class="v111-section-title"><h3>Commentaire</h3></div>${r.employee_comment?`<div class="v66-drawer-comment has-content">${esc(r.employee_comment)}</div>`:'<div class="v111-empty-line">Aucun commentaire ajouté.</div>'}</section>${r.rejection_reason?`<section><div class="v111-section-title"><h3>Motif</h3></div><div class="v66-drawer-comment has-content">${esc(r.rejection_reason)}</div></section>`:""}<section><div class="v111-section-title"><h3>Historique</h3></div><div class="v111-history">${history.join("")}</div></section></main>${actions?`<footer>${actions}</footer>`:""}</article>`);
+        document.body.appendChild(drawer);drawer.querySelector("[data-close]").onclick=()=>drawer.remove();drawer.onclick=e=>{if(e.target===drawer)drawer.remove()};bindLeaveActions(drawer)
+      };
       const cardHtml = (r) => {
-              const own = r.employee_id === profile.id,
-                showType = role !== "conducteur",
-                periodTypes = [...new Set((r.leave_periods || []).map((p) => p.leave_type || r.leave_type))],
-                requestType = periodTypes.length > 1 ? "Congés payés + RTT" : leaveTypeLabels[periodTypes[0] || r.leave_type],
-                total = (r.leave_periods || []).reduce(
-                  (s, p) => s + Number(p.requested_days || 0),
-                  0,
-                );
-              let actions = "";
-              if (canReview && r.status === "pending")
-                actions =
-                  '<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>';
-              if (canReview && r.status === "cancellation_requested")
-                actions =
-                  '<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>';
-              if (own && !canReview && r.status === "pending")
-                actions =
-                  '<button class="v66-btn danger" data-leave-cancel="cancelled">Annuler la demande</button>';
-              if (own && !canReview && r.status === "approved")
-                actions =
-                  '<button class="v66-btn danger" data-leave-cancel="cancellation_requested">Demander l’annulation</button>';
-              return `<article class="v66-card v66-leave-card" data-id="${r.id}"><div class="v66-pagehead"><div><strong>${esc(fullName(r.profiles))}${showType ? ` · ${esc(requestType)}` : " · Absence"}</strong><p>${total.toLocaleString("fr-FR")} jour${total > 1 ? "s" : ""}${r.created_by_rh ? " · Créée par les RH" : ""}</p></div><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status] || r.status)}</span></div><div class="v66-periods">${(
-                r.leave_periods || []
-              )
-                .sort((a, b) => a.position - b.position)
-                .map((p) => `<span>${esc(leavePeriodText(p))}</span>`)
-                .join(
-                  "",
-                )}</div>${r.employee_comment ? `<p class="v66-help">${esc(r.employee_comment)}</p>` : ""}${r.rejection_reason ? `<div class="v66-info">Motif : ${esc(r.rejection_reason)}</div>` : ""}${actions ? `<div class="v66-actions" style="margin-top:12px">${actions}</div>` : ""}</article>`;
+        const own=r.employee_id===profile.id,showType=role!=="conducteur"||own,summary=requestSummary(r),requestType=summary.cp&&summary.rtt?"Congés payés + RTT":summary.rtt?"RTT":summary.cp?"Congés payés":showType?(leaveTypeLabels[r.leave_type]||"Absence"):"Absence";
+        return `<button type="button" class="v66-card v66-leave-card v111-leave-card" data-request-id="${r.id}"><div class="v66-pagehead"><div><strong>${esc(fullName(r.profiles))} · ${esc(requestType)}</strong><p>${summary.start===summary.end?fmtDate(summary.start):`Du ${fmtDate(summary.start)} au ${fmtDate(summary.end)}`} · ${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</p></div><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span></div><span class="v111-card-open">Voir le détail ›</span></button>`;
       };
       if (canReview) {
         let activeTab=routeIntent?.group==="pending"?"pending":"pending",query="",typeFilter="all",periodMonth="all",periodYear="all";routeIntent=null;
         const tabRows={pending:requests.filter(r=>["pending","cancellation_requested"].includes(r.status)),approved:requests.filter(r=>r.status==="approved"),history:requests.filter(r=>["rejected","cancelled"].includes(r.status))};
-        const requestSummary=r=>{const periods=r.leave_periods||[],cp=periods.filter(p=>(p.leave_type||r.leave_type)==="paid_leave").reduce((sum,p)=>sum+Number(p.requested_days||0),0),rtt=periods.filter(p=>(p.leave_type||r.leave_type)==="rtt").reduce((sum,p)=>sum+Number(p.requested_days||0),0),starts=periods.map(p=>p.start_date).sort(),ends=periods.map(p=>p.end_date).sort();return{cp,rtt,start:starts[0]||"",end:ends.at(-1)||"",total:cp+rtt}};
         const filterYears=Array.from({length:81},(_,index)=>2020+index);
         list.innerHTML=`<section class="v66-leave-manager"><div class="v66-leave-tabs" role="tablist"><button type="button" data-leave-tab="pending">À traiter <b>${tabRows.pending.length}</b></button><button type="button" data-leave-tab="approved">Acceptées <b>${tabRows.approved.length}</b></button><button type="button" data-leave-tab="history">Historique <b>${tabRows.history.length}</b></button></div><div class="v66-leave-toolbar v66-leave-toolbar-period"><input class="v66-search" id="v66LeaveSearch" placeholder="Rechercher un salarié…"><select id="v66LeaveTypeFilter" aria-label="Filtrer par type"><option value="all">Toutes les demandes</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select><select id="v66LeavePeriodMonth" aria-label="Filtrer par mois"><option value="all">Mois</option>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select><select id="v66LeavePeriodYear" aria-label="Filtrer par année"><option value="all">Année</option>${filterYears.map(year=>`<option value="${year}">${year}</option>`).join("")}</select><button type="button" class="v66-btn" id="v66LeaveCurrentPeriod">Période actuelle</button></div><div class="v66-leave-rows" id="v66LeaveGroups"></div></section>`;
         const groupsNode=list.querySelector("#v66LeaveGroups");
-        const longDate=value=>new Date(`${value}T12:00:00Z`).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long",year:"numeric",timeZone:"UTC"});
-        const openRequest=r=>{const summary=requestSummary(r),initials=`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase(),periods=(r.leave_periods||[]).sort((a,b)=>a.start_date.localeCompare(b.start_date)),pending=["pending","cancellation_requested"].includes(r.status),drawer=el("div",{class:"v66-drawer-overlay"},`<article class="v66-side-drawer v66-leave-drawer" data-id="${r.id}"><header><div class="v66-drawer-identity"><span class="v66-avatar">${esc(initials)}</span><div><h2>${esc(fullName(r.profiles))}</h2><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span></div></div><button type="button" class="v66-icon-button" data-close>×</button></header><main><section class="v66-drawer-period"><h3>Période demandée</h3><strong>${summary.start===summary.end?longDate(summary.start):`Du ${longDate(summary.start)} au ${longDate(summary.end)}`} — ${summary.total.toLocaleString("fr-FR")} jour${summary.total>1?"s":""}</strong></section><section><h3>Détail des journées</h3><div class="v66-drawer-days">${periods.map(p=>`<div><span>${p.start_date===p.end_date?longDate(p.start_date):`${longDate(p.start_date)} → ${longDate(p.end_date)}`}${p.duration_type!=="full"?` · ${p.duration_type==="morning"?"Matin":"Après-midi"}`:""}</span><b class="${(p.leave_type||r.leave_type)==="rtt"?"is-rtt":"is-cp"}">${esc(leaveTypeLabels[p.leave_type||r.leave_type])}</b></div>`).join("")}</div></section><section><h3>Commentaire</h3><div class="v66-drawer-comment">${esc(r.employee_comment||"Aucun commentaire.")}</div></section>${r.rejection_reason?`<section><h3>Motif</h3><div class="v66-drawer-comment">${esc(r.rejection_reason)}</div></section>`:""}</main>${pending?`<footer>${r.status==="cancellation_requested"?'<button class="v66-btn" data-leave-decision="approved">Conserver l’absence</button><button class="v66-btn danger" data-leave-decision="cancelled">Accepter l’annulation</button>':'<button class="v66-btn danger" data-leave-decision="rejected">Refuser</button><button class="v66-btn primary" data-leave-decision="approved">Accepter</button>'}</footer>`:""}</article>`);document.body.appendChild(drawer);drawer.querySelector("[data-close]").onclick=()=>drawer.remove();drawer.onclick=e=>{if(e.target===drawer)drawer.remove()};bindLeaveActions(drawer)};
         const overlapsSelectedPeriod=r=>{if(periodMonth==="all"&&periodYear==="all")return true;const periods=r.leave_periods||[];return periods.some(period=>{const start=new Date(`${period.start_date}T12:00:00`),end=new Date(`${period.end_date}T12:00:00`);if(periodYear!=="all"&&periodMonth==="all")return start.getFullYear()<=Number(periodYear)&&end.getFullYear()>=Number(periodYear);if(periodYear==="all"){const cursor=new Date(start.getFullYear(),start.getMonth(),1,12),last=new Date(end.getFullYear(),end.getMonth(),1,12);while(cursor<=last){if(cursor.getMonth()===Number(periodMonth))return true;cursor.setMonth(cursor.getMonth()+1)}return false}const rangeStart=new Date(Number(periodYear),Number(periodMonth),1,12),rangeEnd=new Date(Number(periodYear),Number(periodMonth)+1,0,12);return start<=rangeEnd&&end>=rangeStart})};
         const paintGroups=()=>{const q=normalizeSearch(query),rows=tabRows[activeTab].filter(r=>smartSearchMatch(fullName(r.profiles),q)&&(typeFilter==="all"||(r.leave_periods||[]).some(p=>(p.leave_type||r.leave_type)===typeFilter))&&overlapsSelectedPeriod(r));list.querySelectorAll("[data-leave-tab]").forEach(button=>button.classList.toggle("active",button.dataset.leaveTab===activeTab));groupsNode.innerHTML=rows.length?rows.map(r=>{const s=requestSummary(r),created=new Date(r.created_at).toLocaleDateString("fr-FR");return`<button type="button" class="v66-leave-row" data-request-id="${r.id}"><span class="v66-avatar small">${esc(`${(r.profiles?.first_name||"").charAt(0)}${(r.profiles?.last_name||"").charAt(0)}`.toUpperCase())}</span><span class="v66-leave-row-person"><strong>${esc(fullName(r.profiles))}</strong><small>${s.start===s.end?fmtDate(s.start):`Du ${fmtDate(s.start)} au ${fmtDate(s.end)}`}</small></span><span class="v66-leave-row-types">${s.cp?`<b class="is-cp">${s.cp.toLocaleString("fr-FR")} CP</b>`:""}${s.rtt?`<b class="is-rtt">${s.rtt.toLocaleString("fr-FR")} RTT</b>`:""}</span><span class="v66-leave-row-date">Demandée le ${created}</span><span class="v66-pill ${esc(r.status)}">${esc(leaveStatusLabels[r.status]||r.status)}</span><i>›</i></button>`}).join(""):'<div class="v66-empty">Aucune demande pour cette période.</div>';groupsNode.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)))};
         list.querySelectorAll("[data-leave-tab]").forEach(button=>button.onclick=()=>{activeTab=button.dataset.leaveTab;paintGroups()});list.querySelector("#v66LeaveSearch").oninput=e=>{query=e.target.value;paintGroups()};list.querySelector("#v66LeaveTypeFilter").onchange=e=>{typeFilter=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodMonth").onchange=e=>{periodMonth=e.target.value;paintGroups()};list.querySelector("#v66LeavePeriodYear").onchange=e=>{periodYear=e.target.value;paintGroups()};list.querySelector("#v66LeaveCurrentPeriod").onclick=()=>{const now=new Date();periodMonth=String(now.getMonth());periodYear=String(now.getFullYear());list.querySelector("#v66LeavePeriodMonth").value=periodMonth;list.querySelector("#v66LeavePeriodYear").value=periodYear;paintGroups()};paintGroups();
@@ -843,7 +831,7 @@ async function boot(db) {
         list.innerHTML = requests.length
           ? requests.map(cardHtml).join("")
           : '<div class="v66-card v66-empty">Aucune demande pour le moment.</div>';
-        bindLeaveActions();
+        list.querySelectorAll("[data-request-id]").forEach(button=>button.onclick=()=>openRequest(requests.find(r=>r.id===button.dataset.requestId)));
       }
       function bindLeaveActions(scope=list) {
       scope.querySelectorAll("[data-leave-decision]").forEach(

@@ -25,7 +25,7 @@ const assignableRolesFor = (role) => {
   return [];
 };
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-  navigator.serviceWorker.register("./sw.js?v=114", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
+  navigator.serviceWorker.register("./sw.js?v=116", { updateViaCache: "none" }).then(reg=>reg.update()).catch(()=>{});
 }
 
 const statusLabels = {
@@ -327,6 +327,7 @@ async function boot(db) {
       pages.push(["projects", "Chantiers"]);
     pages.push(["leaves", "Congés & RTT"]);
     pages.push(["legacy", "Fiches d’heures"]);
+    if (role === "salarie") pages.push(["my-stats", "Mes statistiques"]);
     return pages;
   }
 
@@ -374,6 +375,7 @@ async function boot(db) {
     if (currentPage === "it-settings") renderItSettings(content);
     if (currentPage === "leaves") renderLeaves(content);
     if (currentPage === "legacy") renderLegacy(content);
+    if (currentPage === "my-stats") renderMyStats(content);
     if (currentPage === "settings") renderSettings(content);
     requestAnimationFrame(()=>{shell.scrollTop=pageScrolls.get(currentPage)||0});
   }
@@ -508,15 +510,64 @@ async function boot(db) {
           <section class="v66-card v113-week-summary"><div class="v112-section-head"><div><h2>Cette semaine</h2><p>Résumé de ta fiche actuelle</p></div></div><div class="v113-mini-kpis"><div><small>Heures</small><strong>${v105FmtHours(totalHours)}</strong></div><div><small>Chantiers</small><strong>${projectKeys.size}</strong></div><div><small>IT déclaré</small><strong>${Math.round(totalIt).toLocaleString("fr-FR")} km</strong></div></div></section>
           <button class="v66-card v113-leave-card" data-go-leaves><div class="v112-section-head"><div><h2>Congés & RTT</h2><p>${nextLeave?"Ta prochaine absence acceptée":"Tes demandes d’absence"}</p></div><span class="v113-arrow">›</span></div>${nextLeave&&nextSummary?`<div class="v113-next-leave"><b>${esc(nextSummary.type)}</b><strong>${nextSummary.start===nextSummary.end?fmtDate(nextSummary.start):`Du ${fmtDate(nextSummary.start)} au ${fmtDate(nextSummary.end)}`}</strong><small>${nextSummary.total.toLocaleString("fr-FR")} jour${nextSummary.total>1?"s":""}</small></div>`:lastLeave&&lastSummary?`<div class="v113-next-leave"><b>${esc(lastSummary.type)}</b><strong>${esc(leaveStatusLabels[lastLeave.status]||lastLeave.status)}</strong><small>${fmtDate(lastSummary.start)}</small></div>`:`<div class="v113-empty-line">Aucune demande récente. <b>Faire une demande ›</b></div>`}</button>
           <section class="v66-card v113-attention"><div class="v112-section-head"><div><h2>À faire</h2><p>Les actions importantes apparaissent ici.</p></div></div>${attention.length?`<div class="v113-task-list">${attention.slice(0,4).map((a,i)=>`<button class="v113-task ${a.tone}" data-task-go="${a.go}"><span>${a.tone==="danger"?"!":"•"}</span><div><strong>${esc(a.title)}</strong><small>${esc(a.text)}</small></div><i>›</i></button>`).join("")}</div>`:`<div class="v113-all-good"><span>✓</span><div><strong>Rien à signaler</strong><small>Tu n’as aucune action urgente pour le moment.</small></div></div>`}</section>
+          <button class="v66-card v115-stats-card v66-dashboard-wide" data-go-my-stats><div class="v115-stats-card-copy"><span class="v112-eyebrow">MES DONNÉES</span><h2>Mes statistiques personnelles</h2><p>Heures, chantiers, IT, évolution par mois et semaines les plus chargées.</p></div><div class="v115-stats-card-kpis"><span><small>Cette semaine</small><strong>${v105FmtHours(totalHours)}</strong></span><span><small>Chantiers</small><strong>${projectKeys.size}</strong></span><span><small>IT</small><strong>${Math.round(totalIt).toLocaleString("fr-FR")} km</strong></span><i>›</i></div></button>
           <section class="v66-card v113-recent v66-dashboard-wide"><div class="v112-section-head"><div><h2>Mes dernières fiches</h2><p>Accès rapide aux semaines précédentes.</p></div><button class="v66-btn" data-go-all-sheets>Voir toutes mes fiches</button></div><div class="v113-recent-grid">${(recent||[]).length?(recent||[]).map(s=>`<button data-recent-year="${s.iso_year}" data-recent-week="${s.iso_week}"><span><strong>${esc(weekTitle(s.iso_year,s.iso_week))}</strong><small>${s.submitted_at?`Envoyée le ${new Date(s.submitted_at).toLocaleDateString("fr-FR")}`:"Fiche enregistrée"}</small></span><span class="v66-pill ${esc(s.status)}">${esc(sheetLabels[s.status]||s.status)}</span><i>›</i></button>`).join(""):'<div class="v113-empty-line">Aucune fiche enregistrée pour le moment.</div>'}</div></section>`;
         dashboard.querySelector("#v66HomeSheet").onclick=()=>navigateTo("legacy",{year:now.year,week:now.week,open:true});
         dashboard.querySelector("[data-go-leaves]")?.addEventListener("click",()=>navigateTo("leaves"));
         dashboard.querySelectorAll('[data-task-go="sheet"]').forEach(b=>b.onclick=()=>navigateTo("legacy",{year:now.year,week:now.week,open:true}));
         dashboard.querySelectorAll('[data-task-go="leaves"]').forEach(b=>b.onclick=()=>navigateTo("leaves"));
         dashboard.querySelector("[data-go-all-sheets]")?.addEventListener("click",()=>navigateTo("legacy",{mySheets:true}));
+        dashboard.querySelector("[data-go-my-stats]")?.addEventListener("click",()=>navigateTo("my-stats"));
         dashboard.querySelectorAll("[data-recent-year]").forEach(b=>b.onclick=()=>navigateTo("legacy",{year:Number(b.dataset.recentYear),week:Number(b.dataset.recentWeek),open:true}));
       }
     } catch(e){dashboard.innerHTML=`<div class="v66-card v66-empty">Impossible de charger le tableau de bord : ${esc(e.message)}</div>`}
+  }
+
+
+  async function renderMyStats(root) {
+    if (visibleRole() !== "salarie") { navigateTo("home"); return; }
+    const currentYear = new Date().getFullYear();
+    const years = Array.from({length: Math.max(1,currentYear-2024+1)},(_,i)=>currentYear-i);
+    root.innerHTML = `<section class="v115-personal-stats"><div class="v66-pagehead"><div><span class="v112-eyebrow">MON ACTIVITÉ</span><h1>Mes statistiques</h1><p>Une vue personnelle construite uniquement à partir de tes propres fiches d’heures.</p></div><button type="button" class="v66-btn" data-back-home>← Accueil</button></div><section class="v115-stats-toolbar v66-card"><label><span>Année</span><select id="v115StatsYear">${years.map(y=>`<option value="${y}">${y}</option>`).join("")}</select></label><button class="v66-btn" id="v115StatsCurrent">Année actuelle</button></section><div id="v115PersonalStats"><div class="v66-card v66-empty">Calcul de tes statistiques…</div></div></section>`;
+    root.querySelector("[data-back-home]").onclick=()=>navigateTo("home");
+    const target=root.querySelector("#v115PersonalStats"), select=root.querySelector("#v115StatsYear");
+    try {
+      const {data,error}=await db.from("timesheets").select("id,status,iso_year,iso_week,submitted_at,timesheet_days(work_date,travel_km,it_needs_review,timesheet_sites(project_id,project_code_snapshot,project_name_snapshot,hours))").eq("employee_id",profile.id).gte("iso_year",2024).order("iso_year",{ascending:true}).order("iso_week",{ascending:true});
+      if(error)throw error;
+      const sheets=(data||[]).filter(x=>x.status!=="draft");
+      const paint=()=>{
+        const year=Number(select.value), rows=sheets.filter(x=>Number(x.iso_year)===year), monthHours=Array(12).fill(0), projectHours=new Map(), weekRows=[];
+        let totalHours=0,totalIt=0,itWarnings=0,workdays=0;
+        rows.forEach(sheet=>{
+          let weekHours=0;
+          (sheet.timesheet_days||[]).forEach(day=>{
+            const dayHours=(day.timesheet_sites||[]).reduce((sum,site)=>sum+Number(site.hours||0),0);
+            if(dayHours>0)workdays++;
+            weekHours+=dayHours; totalHours+=dayHours; totalIt+=Number(day.travel_km||0); if(day.it_needs_review)itWarnings++;
+            const d=day.work_date?new Date(`${day.work_date}T12:00:00`):null;
+            if(d&&!Number.isNaN(d.getTime()))monthHours[d.getMonth()]+=dayHours;
+            (day.timesheet_sites||[]).forEach(site=>{
+              const h=Number(site.hours||0); if(h<=0)return;
+              const key=site.project_id||`${site.project_code_snapshot||""}|${site.project_name_snapshot||""}`;
+              const name=site.project_name_snapshot||site.project_code_snapshot||"Chantier non renseigné";
+              const current=projectHours.get(key)||{name,hours:0}; current.hours+=h; projectHours.set(key,current);
+            });
+          });
+          if(weekHours>0)weekRows.push({week:Number(sheet.iso_week),hours:weekHours,status:sheet.status});
+        });
+        const workedWeeks=weekRows.length,avgWeek=workedWeeks?totalHours/workedWeeks:0,projects=[...projectHours.values()].sort((a,b)=>b.hours-a.hours),topWeeks=[...weekRows].sort((a,b)=>b.hours-a.hours).slice(0,5),maxMonth=Math.max(1,...monthHours),monthNames=["Jan","Fév","Mar","Avr","Mai","Juin","Juil","Août","Sept","Oct","Nov","Déc"];
+        const statusSummary=rows.reduce((m,x)=>(m[x.status]=(m[x.status]||0)+1,m),{});
+        target.innerHTML=`<div class="v115-personal-kpis"><article><small>Heures réalisées</small><strong>${v105FmtHours(totalHours)}</strong><span>${year}</span></article><article><small>Semaines travaillées</small><strong>${workedWeeks}</strong><span>avec heures saisies</span></article><article><small>Moyenne / semaine</small><strong>${v105FmtHours(avgWeek)}</strong><span>sur les semaines travaillées</span></article><article><small>Chantiers travaillés</small><strong>${projects.length}</strong><span>distincts</span></article><article><small>IT déclaré</small><strong>${Math.round(totalIt).toLocaleString("fr-FR")} km</strong><span>${itWarnings?`${itWarnings} à vérifier`:"aucune alerte"}</span></article><article><small>Jours travaillés</small><strong>${workdays}</strong><span>jours avec des heures</span></article></div>
+        <section class="v115-personal-grid"><article class="v66-card v115-month-card"><div class="v112-section-head"><div><h2>Évolution mois par mois</h2><p>Heures enregistrées sur l’année ${year}</p></div></div><div class="v115-month-bars">${monthHours.map((h,i)=>`<div><div class="v115-month-bar"><i style="height:${h?Math.max(4,h/maxMonth*100):0}%"></i></div><small>${monthNames[i]}</small><b>${h?Math.round(h*10)/10:0} h</b></div>`).join("")}</div></article>
+        <article class="v66-card"><div class="v112-section-head"><div><h2>Mes chantiers</h2><p>Répartition de mes heures</p></div></div>${projects.length?`<div class="v115-project-ranking">${projects.slice(0,6).map((p,i)=>`<div><b>${i+1}</b><span><strong>${esc(p.name)}</strong><small>${totalHours?Math.round(p.hours/totalHours*100):0} % de mes heures</small></span><em>${v105FmtHours(p.hours)}</em></div>`).join("")}</div>${projects.length>6?`<small class="v115-more-note">+ ${projects.length-6} autre${projects.length-6>1?"s":""} chantier${projects.length-6>1?"s":""}</small>`:""}`:'<div class="v66-empty">Aucun chantier travaillé sur cette année.</div>'}</article>
+        <article class="v66-card"><div class="v112-section-head"><div><h2>Mes semaines les plus chargées</h2><p>Top 5 de l’année</p></div></div>${topWeeks.length?`<div class="v115-week-ranking">${topWeeks.map((w,i)=>`<div><b>${i+1}</b><span>Semaine ${w.week}</span><strong>${v105FmtHours(w.hours)}</strong></div>`).join("")}</div>`:'<div class="v66-empty">Aucune semaine avec des heures.</div>'}</article>
+        <article class="v66-card"><div class="v112-section-head"><div><h2>Mes fiches</h2><p>État des fiches de l’année</p></div></div><div class="v115-status-summary"><span><small>Validées</small><strong>${statusSummary.validated||0}</strong></span><span><small>En attente</small><strong>${(statusSummary.pending_review||0)+(statusSummary.submitted||0)}</strong></span><span><small>À corriger / refusées</small><strong>${(statusSummary.rejected||0)+(statusSummary.changed_after_validation||0)}</strong></span></div><button class="v66-btn" data-open-sheets>Voir toutes mes fiches</button></article></section>`;
+        target.querySelector("[data-open-sheets]")?.addEventListener("click",()=>navigateTo("legacy",{mySheets:true}));
+      };
+      select.value=String(currentYear); select.onchange=paint; root.querySelector("#v115StatsCurrent").onclick=()=>{select.value=String(currentYear);paint()}; paint();
+    } catch(e) {
+      console.error(e); target.innerHTML='<div class="v66-card v66-empty">Impossible de charger tes statistiques personnelles pour le moment.</div>';
+    }
   }
 
   async function renderAccounts(root) {
@@ -959,19 +1010,26 @@ async function boot(db) {
           ["rejected", "Refusées"],
         ];
         const countFor = status => status === "all" ? myRequests.length : myRequests.filter(r => r.status === status).length;
-        list.innerHTML = `<section class="v114-my-leaves">
-          <div class="v66-leave-tabs v114-my-leave-tabs" role="tablist">
-            ${statusTabs.map(([status,label])=>`<button type="button" data-my-leave-status="${status}" class="${status==="all"?"active":""}">${label} <b>${countFor(status)}</b></button>`).join("")}
+        list.innerHTML = `<section class="v114-my-leaves v116-my-leaves">
+          <div class="v116-my-leave-head">
+            <div>
+              <span class="v116-kicker">Historique personnel</span>
+              <h3>Mes demandes</h3>
+              <p>Retrouve rapidement tes congés et RTT par statut et par période.</p>
+            </div>
+            <div class="v114-my-leave-summary v116-my-leave-summary" id="v114MyLeaveSummary"></div>
           </div>
-          <div class="v66-leave-toolbar v66-leave-toolbar-period v114-my-leave-toolbar">
-            <select id="v114MyLeaveMonth" aria-label="Filtrer par mois"><option value="all">Tous les mois</option>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select>
-            <select id="v114MyLeaveYear" aria-label="Filtrer par année"><option value="all">Toutes les années</option>${filterYears.map(year=>`<option value="${year}">${year}</option>`).join("")}</select>
-            <select id="v114MyLeaveType" aria-label="Filtrer par type"><option value="all">CP + RTT</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select>
-            <select id="v114MyLeaveSort" aria-label="Ordre d’affichage"><option value="desc">Plus récentes d’abord</option><option value="asc">Plus anciennes d’abord</option></select>
-            <button type="button" class="v66-btn" id="v114MyLeaveReset">Réinitialiser</button>
+          <div class="v114-my-leave-tabs v116-my-leave-tabs" role="tablist">
+            ${statusTabs.map(([status,label])=>`<button type="button" data-my-leave-status="${status}" class="${status==="all"?"active":""}"><span>${label}</span><b>${countFor(status)}</b></button>`).join("")}
           </div>
-          <div class="v114-my-leave-summary" id="v114MyLeaveSummary"></div>
-          <div class="v114-my-leave-list" id="v114MyLeaveList"></div>
+          <div class="v114-my-leave-toolbar v116-my-leave-toolbar">
+            <label><span>Mois</span><select id="v114MyLeaveMonth" aria-label="Filtrer par mois"><option value="all">Tous les mois</option>${monthLabels.map((month,index)=>`<option value="${index}">${month}</option>`).join("")}</select></label>
+            <label><span>Année</span><select id="v114MyLeaveYear" aria-label="Filtrer par année"><option value="all">Toutes les années</option>${filterYears.map(year=>`<option value="${year}">${year}</option>`).join("")}</select></label>
+            <label><span>Type</span><select id="v114MyLeaveType" aria-label="Filtrer par type"><option value="all">CP + RTT</option><option value="paid_leave">Congés payés</option><option value="rtt">RTT</option></select></label>
+            <label><span>Tri</span><select id="v114MyLeaveSort" aria-label="Ordre d’affichage"><option value="desc">Plus récentes</option><option value="asc">Plus anciennes</option></select></label>
+            <button type="button" class="v116-reset-btn" id="v114MyLeaveReset" title="Réinitialiser les filtres"><span aria-hidden="true">↺</span> Réinitialiser</button>
+          </div>
+          <div class="v114-my-leave-list v116-my-leave-list" id="v114MyLeaveList"></div>
         </section>`;
         const rowsNode = list.querySelector("#v114MyLeaveList");
         const summaryNode = list.querySelector("#v114MyLeaveSummary");
